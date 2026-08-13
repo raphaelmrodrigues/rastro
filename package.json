@@ -1,0 +1,25 @@
+{
+  "name": "rastro",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Acompanhamento de seguidores do Instagram sem pedir sua senha.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace @rastro/core",
+    "build": "npm run build --workspace @rastro/core",
+    "dev:api": "npm run dev --workspace @rastro/api",
+    "dev:app": "npm run start --workspace @rastro/app",
+    "typecheck": "tsc --build",
+    "dev:app:web": "npm run web --workspace @rastro/app"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~3.2.3",
+    "react-dom": "18.2.0",
+    "react-native-web": "~0.19.10"
+  }
+}

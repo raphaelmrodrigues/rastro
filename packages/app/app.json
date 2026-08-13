@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Rastro",
+    "slug": "rastro",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "description": "Acompanhe quem entrou e quem saiu da sua lista de seguidores, usando o export oficial de dados do Instagram. Nao pedimos sua senha.",
+    "ios": { "supportsTablet": false, "bundleIdentifier": "com.SEUDOMINIO.rastro" },
+    "android": { "package": "com.SEUDOMINIO.rastro" },
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-document-picker", "expo-notifications"]
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.expo/
+*.tsbuildinfo
+.env
+.env.local
+
+# Nunca versionar dados de export: contém a rede social inteira de alguém.
+*.zip
+fixtures/real/
+uploads/
