@@ -15,7 +15,22 @@
  */
 
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { apagarRefreshToken, guardarRefreshToken, lerRefreshToken } from './tokens';
+
+/**
+ * Versão do app, lida do app.json.
+ *
+ * Vai em toda requisição no cabeçalho `x-rastro-versao`. Existe por um motivo
+ * que só aparece daqui a um ou dois anos: um app publicado nunca some do
+ * aparelho de quem instalou, e sem a versão chegando ao servidor não há como
+ * saber quem está rodando o quê — nem como pedir que atualize.
+ *
+ * Este é o tipo de coisa que precisa nascer na v1.0. Adicionar depois não
+ * alcança as versões já instaladas, e aí a única forma de desligá-las seria
+ * quebrar a API e deixar o app dar erro genérico na cara do usuário.
+ */
+export const VERSAO_DO_APP: string = Constants.expoConfig?.version ?? '0.0.0';
 
 /**
  * URL da API.
@@ -50,6 +65,13 @@ export class SessaoExpirada extends Error {
   }
 }
 
+/** O servidor desligou esta versão do app. Não adianta tentar de novo. */
+export class PrecisaAtualizar extends Error {
+  constructor() {
+    super('Esta versão do Rastro não é mais aceita. Atualize o app para continuar.');
+  }
+}
+
 interface Sessao {
   accessToken: string;
   userId: string;
@@ -59,10 +81,16 @@ let sessao: Sessao | null = null;
 /** A renovação em curso, compartilhada por todas as chamadas que esbarrarem nela. */
 let renovacaoEmCurso: Promise<string> | null = null;
 let aoPerderSessao: (() => void) | null = null;
+let aoPrecisarAtualizar: (() => void) | null = null;
 
 /** A UI registra aqui o que fazer quando a sessão morre de vez. */
 export function quandoPerderSessao(callback: () => void): void {
   aoPerderSessao = callback;
+}
+
+/** A UI registra aqui o que fazer quando o servidor desliga esta versão. */
+export function quandoPrecisarAtualizar(callback: () => void): void {
+  aoPrecisarAtualizar = callback;
 }
 
 export function usuarioAtual(): string | null {
@@ -104,13 +132,40 @@ async function bruto(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
-  return comTimeout(timeoutMs, (signal) =>
+  const resposta = await comTimeout(timeoutMs, (signal) =>
     fetch(`${API_URL}${caminho}`, {
       ...init,
       signal,
-      headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
+      headers: {
+        /*
+         * `content-type` só quando há corpo.
+         *
+         * O Fastify recusa com 400 (FST_ERR_CTP_EMPTY_JSON_BODY) uma requisição
+         * que se declara JSON e chega sem corpo. Mandar o cabeçalho sempre
+         * quebrava o DELETE de exclusão de conta — e de um jeito traiçoeiro,
+         * porque o erro falava de corpo vazio, não da rota.
+         */
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        'x-rastro-versao': VERSAO_DO_APP,
+        ...(init.headers ?? {}),
+      },
     }),
   );
+
+  /*
+   * 426 Upgrade Required: esta versão do app foi desligada pelo servidor.
+   *
+   * Tratado aqui, no ponto mais baixo, e não em cada chamada: a partir daqui
+   * nada mais vai funcionar, e deixar cada tela lidar com isso significaria uma
+   * tela esquecendo e mostrando "não foi possível falar com o servidor" — que
+   * manda o usuário procurar problema na internet dele.
+   */
+  if (resposta.status === 426) {
+    aoPrecisarAtualizar?.();
+    throw new PrecisaAtualizar();
+  }
+
+  return resposta;
 }
 
 async function corpoDoErro(resposta: Response): Promise<ErroDeApi> {
@@ -262,6 +317,33 @@ export async function restaurarSessao(): Promise<boolean> {
 
 export function temSessao(): boolean {
   return sessao !== null;
+}
+
+/**
+ * Apaga a conta e tudo que está ligado a ela no servidor. Não tem volta.
+ *
+ * Oferecer isto dentro do app não é gentileza: Apple e Google exigem exclusão de
+ * conta em qualquer app que permita criá-la, e a revisão reprova quem não tem.
+ * O LGPD e o GDPR dizem a mesma coisa por outro caminho.
+ *
+ * A sessão local é encerrada mesmo se o servidor falhar depois do DELETE: nesse
+ * ponto a conta já foi (ou não), e manter o token de uma conta possivelmente
+ * inexistente só produziria erros confusos na próxima abertura.
+ */
+export async function excluirConta(): Promise<void> {
+  /*
+   * A sessão só é encerrada depois do sucesso, e isto não é detalhe de estilo.
+   *
+   * Numa versão anterior o `encerrarSessaoLocal` estava num `finally`: quando o
+   * servidor recusava a exclusão, o app deslogava assim mesmo e voltava para a
+   * tela de entrada — indistinguível de sucesso. A conta continuava existindo e
+   * o usuário achava que tinha apagado. Falso positivo de exclusão é o pior
+   * defeito possível aqui: quebra a promessa, a LGPD e a revisão da loja de uma
+   * vez só. Se falhar, o erro precisa subir com a sessão intacta, para a tela
+   * poder mostrar o que houve.
+   */
+  await autenticado('/auth/me', { method: 'DELETE' });
+  await encerrarSessaoLocal();
 }
 
 // --- Recursos ----------------------------------------------------------------

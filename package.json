@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm run test --workspace @rastro/core",
+    "test": "npm run test --workspace @rastro/core && npm run test --workspace @rastro/api",
     "_comment_build": "core primeiro: a api importa o dist dele. Buildar os dois aqui faz o build funcionar também quando o servidor de deploy roda `npm run build` na raiz sem saber que isto é um monorepo.",
     "build": "npm run build --workspace @rastro/core && npm run build --workspace @rastro/api",
     "_comment_start": "O que a raiz sobe é a API. O app é compilado pelo EAS e nunca roda em servidor. Sem este script, um builder automático não descobre o que iniciar e falha com 'No start command could be found'.",

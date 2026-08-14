@@ -18,7 +18,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from
 import { Avatar, Banner, Button, MenuRow, SectionTitle } from '../components/ui';
 import { IconeEscudo } from '../components/icons';
 import { useConta } from '../lib/conta';
-import { API_URL } from '../api/client';
+import { API_URL, VERSAO_DO_APP } from '../api/client';
 import { colors, radius, space, typography } from '../lib/theme';
 
 interface Props {
@@ -29,8 +29,10 @@ interface Props {
 }
 
 export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }: Props) {
-  const { perfil, ocupado, erro, envio, sair, definirPerfil, enviarPendente } = useConta();
+  const { perfil, ocupado, erro, envio, sair, definirPerfil, enviarPendente, excluirConta } =
+    useConta();
   const [handle, setHandle] = useState('');
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
 
   // Sem perfil ainda: é o passo seguinte ao cadastro, e a tela não deve
   // oferecer mais nada até ele terminar.
@@ -89,6 +91,13 @@ export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }:
 
       <EstadoDoEnvio envio={envio} onTentarDeNovo={enviarPendente} />
 
+      {/*
+       * Erros desta tela precisam aparecer nela. Sem este bloco, uma exclusão de
+       * conta recusada pelo servidor não deixava rastro visível: o usuário
+       * tocava em "Apagar tudo", nada acontecia, e não havia como saber por quê.
+       */}
+      {erro ? <Banner title="Não deu certo" body={erro} tone="danger" /> : null}
+
       <SectionTitle>Seus dados</SectionTitle>
       <MenuRow label="Enviar um arquivo novo" onPress={onImportar} />
       <MenuRow label="Como conseguir o arquivo" onPress={onAbrirSobreArquivo} />
@@ -104,12 +113,53 @@ export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }:
       <SectionTitle>Conta</SectionTitle>
       <Button
         label={ocupado ? 'Saindo…' : 'Sair da conta'}
-        variant="danger"
+        variant="ghost"
         onPress={sair}
         disabled={ocupado}
       />
 
-      <Text style={s.rodape}>{API_URL.replace(/^https?:\/\//, '')}</Text>
+      {/*
+       * Exclusão de conta dentro do app: exigência da Apple e do Google para
+       * qualquer app que permita criar conta, e da LGPD por outro caminho. Sem
+       * isto a revisão da App Store reprova.
+       *
+       * Em dois toques, com o texto do que será apagado no meio. Um botão só,
+       * com "tem certeza?" genérico, é o padrão que faz gente apagar a conta sem
+       * querer — e aqui não há como desfazer.
+       */}
+      {confirmandoExclusao ? (
+        <View style={s.zonaPerigo}>
+          <Text style={s.perigoTitulo}>Apagar sua conta?</Text>
+          <Text style={s.perigoTexto}>
+            Some tudo: seu histórico, suas listas e as atualizações guardadas neste aparelho.
+            Não dá para recuperar depois, e você teria que começar do zero com um arquivo novo.
+          </Text>
+          <View style={s.perigoBotoes}>
+            <View style={s.perigoBotao}>
+              <Button label="Cancelar" variant="ghost" onPress={() => setConfirmandoExclusao(false)} />
+            </View>
+            <View style={s.perigoBotao}>
+              <Button
+                label={ocupado ? 'Apagando…' : 'Apagar tudo'}
+                variant="danger"
+                onPress={() => void excluirConta()}
+                disabled={ocupado}
+              />
+            </View>
+          </View>
+        </View>
+      ) : (
+        <Button
+          label="Apagar minha conta"
+          variant="danger"
+          onPress={() => setConfirmandoExclusao(true)}
+          disabled={ocupado}
+        />
+      )}
+
+      <Text style={s.rodape}>
+        Rastro {VERSAO_DO_APP} · {API_URL.replace(/^https?:\/\//, '')}
+      </Text>
     </ScrollView>
   );
 }
@@ -218,4 +268,20 @@ const s = StyleSheet.create({
     textAlign: 'center',
     marginTop: space.lg,
   },
+
+  zonaPerigo: {
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: radius.md,
+    padding: space.md,
+    gap: space.sm,
+  },
+  perigoTitulo: {
+    color: colors.danger,
+    fontSize: typography.scale.body,
+    fontWeight: typography.weight.semibold,
+  },
+  perigoTexto: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
+  perigoBotoes: { flexDirection: 'row', gap: space.sm },
+  perigoBotao: { flex: 1 },
 });

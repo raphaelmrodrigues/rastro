@@ -45,6 +45,7 @@ import { StatsScreen } from './screens/StatsScreen';
 import { SobreOArquivoScreen } from './screens/SobreOArquivoScreen';
 import { PerfilScreen } from './screens/PerfilScreen';
 import { AuthScreen } from './screens/AuthScreen';
+import { AtualizarScreen } from './screens/AtualizarScreen';
 import { Header, TabBar, type Aba } from './components/Chrome';
 import { Logotipo } from './components/Marca';
 import { useStore } from './lib/store';
@@ -92,7 +93,7 @@ export default function App() {
 
   const { loading, importing, progress, snapshot, reports, snapshotCount, error, boot, importZip } =
     useStore();
-  const { conectado, perfil, iniciar } = useConta();
+  const { conectado, perfil, iniciar, precisaAtualizar } = useConta();
 
   useEffect(() => {
     void boot();
@@ -125,6 +126,19 @@ export default function App() {
       setLendo(false);
     }
   };
+
+  /*
+   * Corte de versão vem antes de tudo, inclusive do carregamento e do login:
+   * se o servidor desligou esta versão, nenhuma outra tela tem o que fazer, e
+   * mostrar a de login primeiro só produziria um erro no meio da tentativa.
+   */
+  if (precisaAtualizar) {
+    return (
+      <Raiz>
+        <AtualizarScreen />
+      </Raiz>
+    );
+  }
 
   // Sessão ainda sendo restaurada, ou dados locais ainda carregando.
   if (conectado === null || loading) {

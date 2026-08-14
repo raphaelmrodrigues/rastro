@@ -23,6 +23,7 @@ import { snapshotRoutes } from './routes/snapshots.js';
 import { authRoutes } from './routes/auth.js';
 import { instagramRoutes } from './routes/instagram.js';
 import { startMetricsScheduler } from './lib/scheduler.js';
+import { versaoRecusada } from './lib/versaoDoApp.js';
 
 /**
  * 3000 é o padrão de metade dos projetos Node e já está ocupado na VPS. 4891 não
@@ -90,6 +91,19 @@ export async function buildServer() {
   await app.register(cors, {
     origin: origensPermitidas(),
     credentials: true,
+    /*
+     * `methods` explícito porque o padrão do @fastify/cors é só
+     * `GET,HEAD,POST` — DELETE fica de fora.
+     *
+     * O efeito disso não aparecia em teste de rota: o navegador barra a
+     * requisição no preflight, então `DELETE /auth/me` (exclusão de conta) e
+     * `DELETE /auth/sessions/:id` nunca chegavam ao servidor pela web. O app
+     * nativo não manda `Origin` e por isso escapava — o que tornaria o defeito
+     * ainda mais difícil de achar depois, funcionando num lugar e no outro não.
+     */
+    methods: ['GET', 'HEAD', 'POST', 'DELETE'],
+    // O app manda a própria versão em todo request; sem isto o preflight recusa.
+    allowedHeaders: ['content-type', 'authorization', 'x-rastro-versao'],
   });
 
   /*
@@ -122,6 +136,27 @@ export async function buildServer() {
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
+
+  /*
+   * Corte de versão do app. Ver lib/versaoDoApp.ts para o porquê.
+   *
+   * Depois do /health de propósito: o healthcheck do Dokploy não manda o
+   * cabeçalho, e um corte mal configurado que derrubasse o /health faria o
+   * orquestrador matar o container em laço.
+   */
+  app.addHook('onRequest', async (req, reply) => {
+    const minima = versaoRecusada(req.headers['x-rastro-versao'] as string | undefined);
+    if (!minima) return;
+
+    // 426 é o código específico para "o cliente precisa mudar de versão". O app
+    // reconhece esse número e mostra a tela de atualização; qualquer outro
+    // código viraria uma mensagem genérica de falha de rede.
+    return reply.code(426).send({
+      error: 'Esta versão do app não é mais aceita.',
+      hint: 'Atualize o Rastro na loja para continuar.',
+      versaoMinima: minima,
+    });
+  });
 
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(snapshotRoutes, { prefix: '/profiles/:profileId/snapshots' });

@@ -22,8 +22,11 @@ import {
   entrar as apiEntrar,
   enviarSnapshot,
   ErroDeApi,
+  excluirConta as apiExcluirConta,
   listarPerfis,
+  PrecisaAtualizar,
   quandoPerderSessao,
+  quandoPrecisarAtualizar,
   restaurarSessao,
   sair as apiSair,
   SessaoExpirada,
@@ -31,6 +34,7 @@ import {
   usuarioAtual,
   type PerfilRemoto,
 } from '../api/client';
+import { eraseEverything } from './storage';
 
 /** Onde o @ do perfil fica entre aberturas do app. Não é segredo: é um rótulo. */
 const CHAVE_PERFIL = 'rastro:profileId';
@@ -68,8 +72,12 @@ interface ContaState {
   ocupado: boolean;
   erro: string | null;
   envio: EstadoDeEnvio;
+  /** O servidor desligou esta versão. Só a tela de atualização abre. */
+  precisaAtualizar: boolean;
 
   iniciar: () => Promise<void>;
+  /** Apaga a conta no servidor e os dados deste aparelho. Sem volta. */
+  excluirConta: () => Promise<boolean>;
   cadastrar: (email: string, senha: string) => Promise<boolean>;
   entrar: (email: string, senha: string) => Promise<boolean>;
   sair: () => Promise<void>;
@@ -82,6 +90,7 @@ interface ContaState {
 }
 
 function mensagemDe(erro: unknown): string {
+  if (erro instanceof PrecisaAtualizar) return erro.message;
   if (erro instanceof SessaoExpirada) return erro.message;
   if (erro instanceof ErroDeApi) return erro.hint ? `${erro.message} ${erro.hint}` : erro.message;
   return 'Não foi possível falar com o servidor.';
@@ -94,12 +103,19 @@ export const useConta = create<ContaState>((set, get) => ({
   ocupado: false,
   erro: null,
   envio: { situacao: 'ocioso' },
+  precisaAtualizar: false,
 
   async iniciar() {
     // Se o refresh token for recusado enquanto o app está aberto, a UI precisa
     // saber na hora — senão o usuário fica numa tela que não responde mais.
     quandoPerderSessao(() => {
       set({ conectado: false, userId: null, perfil: null });
+    });
+
+    // Idem para o corte de versão: pode chegar em qualquer chamada, inclusive
+    // muito depois da abertura, se o corte for configurado com o app já aberto.
+    quandoPrecisarAtualizar(() => {
+      set({ precisaAtualizar: true });
     });
 
     const ok = await restaurarSessao();
@@ -153,6 +169,38 @@ export const useConta = create<ContaState>((set, get) => ({
       perfil: null,
       envio: { situacao: 'ocioso' },
     });
+  },
+
+  async excluirConta() {
+    set({ ocupado: true, erro: null });
+    try {
+      await apiExcluirConta();
+    } catch (erro) {
+      set({ ocupado: false, erro: mensagemDe(erro) });
+      return false;
+    }
+
+    /*
+     * Os dados locais vão junto, e isso não é detalhe.
+     *
+     * O aparelho guarda a rede social inteira da pessoa. Apagar só o lado do
+     * servidor deixaria os snapshots aqui, e quem pediu exclusão não espera que
+     * a lista de quem o segue continue no celular. Fora do try do servidor de
+     * propósito: mesmo que a chamada tenha falhado, se chegamos aqui é porque
+     * ela não lançou.
+     */
+    await eraseEverything();
+    salvarPerfil(null);
+    globalThis.localStorage?.removeItem(CHAVE_ULTIMO_ENVIADO);
+
+    set({
+      ocupado: false,
+      conectado: false,
+      userId: null,
+      perfil: null,
+      envio: { situacao: 'ocioso' },
+    });
+    return true;
   },
 
   async definirPerfil(handle) {
