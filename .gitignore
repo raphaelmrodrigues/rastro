@@ -5,8 +5,13 @@ build/
 *.tsbuildinfo
 .env
 .env.local
+.claude
+.idea
 
 # Nunca versionar dados de export: contém a rede social inteira de alguém.
+# O glob cobre instagram/, instagram_json/ e qualquer pasta de export futura —
+# um export descompactado é texto puro com nome, @ e data de cada contato.
+instagram*/
 *.zip
 fixtures/real/
 uploads/

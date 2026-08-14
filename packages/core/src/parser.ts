@@ -10,7 +10,14 @@
  * O formato do export muda sem aviso; um import parcial é melhor que um import falho.
  */
 
-import { looksLikeHtml, parseHtmlList, type HtmlEntry } from './htmlExport.js';
+import { looksLikeHtml, parseHtmlList, usernameFromHref, type HtmlEntry } from './htmlExport.js';
+import {
+  DISPLAY_NAME_LABELS,
+  normalizeLabel,
+  repairMojibake,
+  URL_LABELS,
+  USERNAME_LABELS,
+} from './text.js';
 import type {
   ExportFormat,
   ParseWarning,
@@ -19,14 +26,31 @@ import type {
   Snapshot,
 } from './types.js';
 
-/** Forma bruta de uma entrada do export em JSON. */
+/**
+ * Forma bruta de uma entrada do export em JSON.
+ *
+ * São três formas diferentes dentro do MESMO export — confirmado em arquivo real
+ * de agosto/2026:
+ *
+ * 1. followers_1.json ....... string_list_data[0].value tem o @
+ * 2. following.json ......... string_list_data[0] NÃO tem value; o @ está em title
+ * 3. blocked_profiles.json .. sem string_list_data; label_values traz
+ *    pending_follow_requests   [{label:"Nome de usuário", value:"fulano"}], com o
+ *    recently_unfollowed       rótulo localizado e ainda por cima com mojibake
+ *
+ * Tratar só a forma 1 (o que fazíamos) descarta as outras duas em silêncio: no
+ * export real isso era 1.355 de 2.716 registros, e "seguindo: 0" na tela.
+ */
 interface RawEntry {
   title?: string;
+  /** Só nas listas em label_values: quando a relação começou. */
+  timestamp?: number;
   string_list_data?: Array<{
     href?: string;
     value?: string;
     timestamp?: number;
   }>;
+  label_values?: Array<{ label?: string; value?: string }>;
 }
 
 /**
@@ -72,6 +96,12 @@ function extractEntries(
   if (Array.isArray(raw)) return raw as RawEntry[];
 
   if (raw && typeof raw === 'object') {
+    // Lista de um item só vem como o objeto cru, sem array em volta
+    // (restricted_profiles.json com um único perfil). Precisa ser testado antes
+    // da contagem de arrays: senão o media/label_values internos parecem "duas
+    // listas" e a entrada é lida como se fosse três pessoas.
+    if (isLabelValuesRecord(raw)) return [raw as RawEntry];
+
     const arrays = Object.values(raw as Record<string, unknown>).filter(Array.isArray);
     if (arrays.length === 1) return arrays[0] as RawEntry[];
     if (arrays.length > 1) {
@@ -92,6 +122,31 @@ function extractEntries(
   return [];
 }
 
+function isLabelValuesRecord(raw: unknown): boolean {
+  return (
+    !!raw &&
+    typeof raw === 'object' &&
+    Array.isArray((raw as RawEntry).label_values) &&
+    ('fbid' in raw || 'timestamp' in raw)
+  );
+}
+
+/** Lê um par rótulo/valor da forma 3, já sem mojibake e sem acento no rótulo. */
+function fromLabels(entry: RawEntry, labels: Set<string>): string | undefined {
+  for (const par of entry.label_values ?? []) {
+    if (par.label === undefined || !par.value) continue;
+    if (labels.has(normalizeLabel(par.label))) return repairMojibake(par.value).trim();
+  }
+  return undefined;
+}
+
+/**
+ * Uma entrada bruta -> Relationship, cobrindo as três formas.
+ *
+ * A ordem das tentativas é por confiabilidade decrescente. O href é o último
+ * recurso para o @ porque o deep link (/_u/fulano) já apareceu apontando para
+ * um perfil diferente do da linha em exports antigos.
+ */
 function toRelationship(
   entry: RawEntry,
   file: string,
@@ -99,10 +154,30 @@ function toRelationship(
   warnings: ParseWarning[],
 ): Relationship | null {
   const data = entry.string_list_data?.[0];
-  const username = data?.value?.trim().toLowerCase();
+  const href = data?.href || fromLabels(entry, URL_LABELS) || undefined;
+
+  const username = (
+    data?.value?.trim() ||
+    entry.title?.trim() ||
+    fromLabels(entry, USERNAME_LABELS) ||
+    (href ? usernameFromHref(href) : null) ||
+    ''
+  )
+    .replace(/^@/, '')
+    .toLowerCase();
+
   if (!username) return null;
 
-  if (data?.timestamp == null) {
+  // title carrega o @ na forma 2 e o nome de exibição em nenhuma; só é nome
+  // quando difere do @ que já achamos.
+  const displayNameBruto = fromLabels(entry, DISPLAY_NAME_LABELS) ?? entry.title?.trim();
+  const displayName =
+    displayNameBruto && displayNameBruto.toLowerCase() !== username
+      ? repairMojibake(displayNameBruto)
+      : undefined;
+
+  const timestamp = data?.timestamp ?? entry.timestamp;
+  if (timestamp == null) {
     warnings.push({
       code: 'MISSING_TIMESTAMP',
       file,
@@ -112,9 +187,10 @@ function toRelationship(
 
   return {
     username,
-    href: data?.href,
+    ...(href ? { href } : {}),
+    ...(displayName ? { displayName } : {}),
     // O Instagram usa epoch em SEGUNDOS. Multiplicar antes de virar Date.
-    since: data?.timestamp != null ? data.timestamp * 1000 : fallbackTimestamp,
+    since: timestamp != null ? timestamp * 1000 : fallbackTimestamp,
   };
 }
 
@@ -200,9 +276,26 @@ export function parseExport(input: ParseInput): Snapshot {
       }
     } else {
       sawJson = true;
-      for (const entry of extractEntries(raw, normalized, warnings)) {
+      const entries = extractEntries(raw, normalized, warnings);
+      let ignoradas = 0;
+
+      for (const entry of entries) {
         const rel = toRelationship(entry, normalized, importedAt, warnings);
         if (rel) parsed.push(rel);
+        else ignoradas++;
+      }
+
+      // Entrada sem @ legível costuma significar formato novo, e formato novo
+      // some com a lista inteira. Antes isto era descartado calado: um export
+      // com 1.157 "seguindo" virava zero na tela, sem um aviso sequer.
+      if (ignoradas > 0) {
+        warnings.push({
+          code: 'ENTRIES_SKIPPED',
+          file: normalized,
+          detail:
+            `${ignoradas} de ${entries.length} entradas deste arquivo não tinham ` +
+            'um @ legível e foram ignoradas. O formato do export pode ter mudado.',
+        });
       }
     }
 

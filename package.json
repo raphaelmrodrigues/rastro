@@ -9,10 +9,11 @@
   "scripts": {
     "test": "npm run test --workspace @rastro/core",
     "build": "npm run build --workspace @rastro/core",
-    "dev:api": "npm run dev --workspace @rastro/api",
-    "dev:app": "npm run start --workspace @rastro/app",
-    "typecheck": "tsc --build",
-    "dev:app:web": "npm run web --workspace @rastro/app"
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/api/tsconfig.json --noEmit && tsc -p packages/app/tsconfig.json --noEmit",
+    "_comment": "app e api consomem o core compilado (dist). Sem o build antes, sobe a versão anterior do parser e o bug some sem explicação — já aconteceu.",
+    "dev:api": "npm run build && npm run dev --workspace @rastro/api",
+    "dev:app": "npm run build && npm run start --workspace @rastro/app",
+    "dev:app:web": "npm run build && npm run web --workspace @rastro/app"
   },
   "engines": {
     "node": ">=20"

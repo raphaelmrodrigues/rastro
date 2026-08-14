@@ -76,13 +76,21 @@ export function Banner({
   );
 }
 
-/** Linha de pessoa: @ em destaque, contexto temporal abaixo. */
+/**
+ * Linha de pessoa: @ em destaque, contexto temporal abaixo.
+ *
+ * Com `onPress`, a linha inteira e o alvo — nao so o texto do @. Numa lista de
+ * centenas de nomes lida com o polegar, um alvo de uma linha de altura erra o
+ * tempo todo. O "↗" a direita e a unica marca de que abre fora do app; o @ fica
+ * na cor normal de proposito, porque ambar aqui significaria "entrou alguem".
+ */
 export function PersonRow({
   username,
   displayName,
   detail,
   approximate,
   badge,
+  onPress,
 }: {
   username: string;
   displayName?: string;
@@ -90,9 +98,10 @@ export function PersonRow({
   /** Marca visualmente que a data e uma janela, nao um instante. */
   approximate?: boolean;
   badge?: string;
+  onPress?: () => void;
 }) {
-  return (
-    <View style={s.person}>
+  const conteudo = (pressionado: boolean) => (
+    <View style={[s.person, pressionado && s.personPressed]}>
       <View style={s.personText}>
         <Text style={s.personHandle} numberOfLines={1}>
           @{username}
@@ -114,7 +123,20 @@ export function PersonRow({
           <Text style={s.badgeLabel}>{badge}</Text>
         </View>
       ) : null}
+      {onPress ? <Text style={s.personLinkIcon}>↗</Text> : null}
     </View>
+  );
+
+  if (!onPress) return conteudo(false);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="link"
+      accessibilityLabel={`Abrir o perfil de @${username} no Instagram`}
+    >
+      {({ pressed }) => conteudo(pressed)}
+    </Pressable>
   );
 }
 
@@ -211,7 +233,10 @@ const s = StyleSheet.create({
     borderBottomColor: colors.border,
     gap: space.sm,
   },
+  // Feedback de toque. Vale para o dedo e, na web, o RNW ja aplica cursor de link.
+  personPressed: { backgroundColor: colors.surface },
   personText: { flex: 1, gap: 2 },
+  personLinkIcon: { color: colors.inkFaint, fontSize: typography.scale.body },
   personHandle: { color: colors.ink, fontSize: typography.scale.body },
   personName: { color: colors.inkMuted, fontSize: typography.scale.caption },
   personDetail: { color: colors.inkFaint, fontSize: typography.scale.micro },

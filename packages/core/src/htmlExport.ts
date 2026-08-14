@@ -34,6 +34,7 @@
  * Layout novo com a mesma semântica continua funcionando.
  */
 
+import { DISPLAY_NAME_LABELS, normalizeLabel, USERNAME_LABELS } from './text.js';
 import type { ParseWarning } from './types.js';
 
 /** Uma entrada já normalizada, no mesmo formato que o caminho JSON produz. */
@@ -90,14 +91,6 @@ const LONG_MONTHS: Record<string, number> = {
 };
 
 /**
- * Rótulos de tabela que identificam a coluna do @ e a do nome de exibição.
- * Comparados em minúsculas e sem acento, porque a acentuação já variou entre
- * versões do export.
- */
-const USERNAME_LABELS = new Set(['nome de usuario', 'username', 'nombre de usuario']);
-const DISPLAY_NAME_LABELS = new Set(['nome', 'name', 'nombre']);
-
-/**
  * Marcadores de período do dia. O HTML usa relógio de 12 horas, e o português do
  * Instagram escreve "da tarde/noite" — uma string só para os dois períodos.
  */
@@ -120,15 +113,6 @@ function decodeEntities(text: string): string {
     if (key.startsWith('#')) return String.fromCodePoint(Number(key.slice(1)));
     return whole;
   });
-}
-
-function normalizeLabel(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .trim()
-    .toLowerCase()
-    .replace(/:$/, '');
 }
 
 /**

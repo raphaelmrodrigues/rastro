@@ -29,13 +29,19 @@ docs/            produto, arquitetura, formato do export, modo conectado, roadma
 
 ```bash
 npm install
-npm run test          # 60 testes do core
-npm run dev:api       # API em localhost:3000
+npm run test          # testes do core
+npm run dev:api       # API em localhost:4891
 npm run dev:app       # Expo
 ```
 
 Para a API: copie `packages/api/.env.example` para `.env` e ajuste.
-O schema do banco está em `packages/api/src/db/schema.sql`.
+
+O banco é versionado por migrations em `packages/api/src/db/migrations/`, aplicadas
+por `npm run migrate:dev --workspace @rastro/api`. Em produção isso roda sozinho no
+`start`, antes de o servidor subir. Migration já aplicada nunca é editada — o runner
+compara o checksum e recusa o deploy; crie uma nova.
+
+Deploy: `Dockerfile` e `docker-compose.yml` na raiz. Ver `docs/DEPLOY.md`.
 
 ## Os dois modos
 

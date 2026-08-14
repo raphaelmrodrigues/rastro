@@ -5,12 +5,12 @@
  * API e opcional e existe so para sincronizar historico entre aparelhos.
  *
  * Regra: filtrar antes de descompactar. O export completo do Instagram passa de
- * 100 MB e e quase todo midia; descompactar tudo num celular trava o app. Dos
- * milhares de arquivos do zip, sete interessam.
+ * 100 MB — o do dono do projeto tem 479 MB — e e quase todo midia. Dos milhares
+ * de arquivos do zip, dez interessam, somando menos de 700 KB.
  */
 
-import JSZip from 'jszip';
 import { parseExport, RELEVANT_EXPORT_FILE, type Snapshot } from '@rastro/core';
+import { extrairDoZip, type FonteArquivo } from './zip';
 
 export interface ImportResult {
   snapshot: Snapshot;
@@ -27,20 +27,23 @@ export interface ImportResult {
  * download seria perder o usuario por preciosismo.
  */
 export async function snapshotFromZip(
-  data: ArrayBuffer,
+  fonte: FonteArquivo,
   snapshotId: string,
+  aoProgredir?: (fracao: number) => void,
 ): Promise<ImportResult> {
-  const zip = await JSZip.loadAsync(data);
+  const extraidos = await extrairDoZip(
+    fonte,
+    (nome) => RELEVANT_EXPORT_FILE.test(nome),
+    aoProgredir,
+  );
+
   const files: Record<string, unknown> = {};
-
-  for (const [path, entry] of Object.entries(zip.files)) {
-    if (entry.dir || !RELEVANT_EXPORT_FILE.test(path)) continue;
-
+  for (const [caminho, conteudo] of Object.entries(extraidos)) {
     try {
-      const content = await entry.async('string');
-      files[path] = path.endsWith('.json') ? JSON.parse(content) : content;
+      files[caminho] = caminho.endsWith('.json') ? JSON.parse(conteudo) : conteudo;
     } catch {
-      // Arquivo corrompido nao derruba o import inteiro. O core registra o warning.
+      // JSON quebrado nao derruba o import inteiro. O core registra o warning
+      // do que faltou; um import parcial vale mais que um import falho.
     }
   }
 

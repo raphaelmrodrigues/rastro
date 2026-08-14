@@ -12,6 +12,7 @@ import type { Account, Relationship, SnapshotDiff, SnapshotInsights } from '@ras
 import { Banner, Button, EmptyState, PersonRow } from '../components/ui';
 import { colors, radius, space, typography } from '../lib/theme';
 import { describeEvent, formatDate, formatRelative } from '../lib/format';
+import { abrirPerfil } from '../lib/perfil';
 import type { ListaId } from './DashboardScreen';
 
 interface Item {
@@ -118,6 +119,9 @@ function toItems(lista: ListaId, insights: SnapshotInsights, diff: SnapshotDiff 
 
 export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
   const [busca, setBusca] = useState('');
+  // So aparece se o aparelho recusar tanto o app quanto o navegador. Raro, mas
+  // silenciar seria pior: o usuario ficaria tocando numa linha que nao responde.
+  const [falhouAoAbrir, setFalhouAoAbrir] = useState(false);
   const { title, explicacao } = TITULOS[lista];
 
   const items = useMemo(() => toItems(lista, insights, diff), [lista, insights, diff]);
@@ -131,6 +135,10 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
   }, [items, busca]);
 
   const renames = lista === 'saíram' ? (diff?.renames ?? []) : [];
+
+  const abrir = (username: string) => {
+    void abrirPerfil(username).then((ok) => setFalhouAoAbrir(!ok));
+  };
 
   return (
     <View style={s.screen}>
@@ -150,6 +158,18 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
         ListHeaderComponent={
           <View style={s.listHeader}>
             <Text style={s.explicacao}>{explicacao}</Text>
+            <Text style={s.dica}>Toque em qualquer linha para abrir o perfil no Instagram.</Text>
+
+            {falhouAoAbrir ? (
+              <Banner
+                title="Não consegui abrir o Instagram"
+                tone="danger"
+                body={
+                  'O aparelho recusou abrir o link. Se o navegador estiver bloqueando janelas ' +
+                  'novas, libere para este site e tente de novo.'
+                }
+              />
+            ) : null}
 
             {renames.length > 0 ? (
               <Banner
@@ -181,6 +201,7 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
             {...(item.detail ? { detail: item.detail } : {})}
             {...(item.approximate ? { approximate: true } : {})}
             {...(item.badge ? { badge: item.badge } : {})}
+            onPress={() => abrir(item.username)}
           />
         )}
         ListEmptyComponent={
@@ -211,6 +232,7 @@ const s = StyleSheet.create({
     lineHeight: 20,
     marginTop: space.sm,
   },
+  dica: { color: colors.inkFaint, fontSize: typography.scale.micro },
   input: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,

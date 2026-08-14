@@ -24,6 +24,8 @@ import {
 // sufixo .js que o core usa por causa do NodeNext.
 import { loadSnapshot, readIndex, saveSnapshot, eraseEverything } from './storage';
 import { snapshotFromZip } from './importExport';
+import { useConta } from './conta';
+import type { FonteArquivo } from './zip';
 
 export interface Reports {
   insights: SnapshotInsights;
@@ -36,6 +38,8 @@ export interface Reports {
 interface State {
   loading: boolean;
   importing: boolean;
+  /** Fração já lida do zip (0..1). O export completo leva dezenas de segundos. */
+  progress: number;
   snapshot: Snapshot | null;
   previous: Snapshot | null;
   reports: Reports | null;
@@ -43,7 +47,7 @@ interface State {
   error: string | null;
 
   boot: () => Promise<void>;
-  importZip: (data: ArrayBuffer) => Promise<{ ok: boolean; message?: string }>;
+  importZip: (fonte: FonteArquivo) => Promise<{ ok: boolean; message?: string }>;
   eraseAll: () => Promise<void>;
 }
 
@@ -65,6 +69,7 @@ function newId(): string {
 export const useStore = create<State>((set, get) => ({
   loading: true,
   importing: false,
+  progress: 0,
   snapshot: null,
   previous: null,
   reports: null,
@@ -92,10 +97,12 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 
-  async importZip(data) {
-    set({ importing: true, error: null });
+  async importZip(fonte) {
+    set({ importing: true, progress: 0, error: null });
     try {
-      const { snapshot, filesFound } = await snapshotFromZip(data, newId());
+      const { snapshot, filesFound } = await snapshotFromZip(fonte, newId(), (fracao) =>
+        set({ progress: fracao }),
+      );
 
       if (filesFound === 0) {
         set({ importing: false });
@@ -127,6 +134,18 @@ export const useStore = create<State>((set, get) => ({
         snapshotCount: get().snapshotCount + 1,
         reports: buildReports(snapshot, anterior),
       });
+
+      /*
+       * Envio ao servidor, se houver conta. Depois de gravar e sem `await`:
+       * o import já está completo e válido neste aparelho, e prender a tela
+       * esperando a rede transformaria a parte confiável do produto na parte
+       * frágil. Falha de envio vira estado 'pendente' na tela de conta, nunca
+       * um import perdido.
+       *
+       * `sincronizar` sai cedo e em silêncio quando não há conta — que é o modo
+       * padrão. Nenhum byte é enviado sem o usuário ter criado conta.
+       */
+      void useConta.getState().sincronizar(snapshot);
 
       return { ok: true };
     } catch (error) {

@@ -16,6 +16,10 @@ export const sql = postgres(url ?? 'postgres://rastro:rastro@localhost:5432/rast
   // com parâmetro — o `debug` do driver imprimiria os @s.
   debug: false,
   transform: { undefined: null },
+  // NOTICE do Postgres é ruído no boot ("relation already exists, skipping" a
+  // cada migrate). Some por padrão e volta com LOG_LEVEL=debug, quando é
+  // justamente o que se quer ver.
+  onnotice: process.env.LOG_LEVEL === 'debug' ? undefined : () => {},
 });
 
 export type Sql = typeof sql;

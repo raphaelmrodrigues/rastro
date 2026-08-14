@@ -122,7 +122,7 @@ docs/              produto, arquitetura, formato do export, modo conectado, road
 ```bash
 npm install              # na raiz, instala todos os workspaces
 npm run test             # testes do core
-npm run dev:api          # sobe o Fastify em :3000
+npm run dev:api          # sobe o Fastify em :4891
 npm run dev:app          # sobe o Expo
 ```
 

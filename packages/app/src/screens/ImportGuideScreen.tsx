@@ -63,12 +63,30 @@ const STEPS = [
 interface Props {
   onPickFile: () => void;
   onOpenModes: () => void;
+  onOpenConta: () => void;
   importing?: boolean;
+  /** Fração já lida do zip (0..1). O export completo passa de 400 MB. */
+  progress?: number;
   /** Mensagem de falha do último import, se houve. */
   error?: string | null;
 }
 
-export function ImportGuideScreen({ onPickFile, onOpenModes, importing, error }: Props) {
+export function ImportGuideScreen({
+  onPickFile,
+  onOpenModes,
+  onOpenConta,
+  importing,
+  progress,
+  error,
+}: Props) {
+  // Sem porcentagem enquanto não há o que mostrar: um "0%" parado é pior que
+  // nenhum número, porque parece travado.
+  const rotulo = importing
+    ? progress && progress > 0.01
+      ? `Lendo o arquivo… ${Math.round(progress * 100)}%`
+      : 'Lendo o arquivo…'
+    : 'Enviar arquivo';
+
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
       <Text style={s.eyebrow}>Primeiro import</Text>
@@ -102,7 +120,7 @@ export function ImportGuideScreen({ onPickFile, onOpenModes, importing, error }:
       ))}
 
       <Pressable style={[s.primary, importing && s.primaryDisabled]} onPress={onPickFile} disabled={importing}>
-        <Text style={s.primaryLabel}>{importing ? 'Lendo o arquivo…' : 'Enviar arquivo'}</Text>
+        <Text style={s.primaryLabel}>{rotulo}</Text>
       </Pressable>
 
       <Pressable onPress={() => Linking.openURL('https://www.instagram.com/download/request/')}>
@@ -111,6 +129,10 @@ export function ImportGuideScreen({ onPickFile, onOpenModes, importing, error }:
 
       <Pressable onPress={onOpenModes}>
         <Text style={s.secondaryLabel}>Dá para usar sem baixar esse arquivo?</Text>
+      </Pressable>
+
+      <Pressable onPress={onOpenConta}>
+        <Text style={s.secondaryLabel}>Já usa o Rastro em outro aparelho? Entrar</Text>
       </Pressable>
     </ScrollView>
   );

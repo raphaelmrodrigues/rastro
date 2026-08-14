@@ -75,6 +75,11 @@ export interface ParseWarning {
     | 'EMPTY_LIST'
     | 'MISSING_TIMESTAMP'
     | 'DUPLICATE_USERNAME'
+    /**
+     * Entradas descartadas por não ter um @ legível. Sinal de formato novo:
+     * é assim que uma lista inteira some sem ninguém perceber.
+     */
+    | 'ENTRIES_SKIPPED'
     /** Data em texto que nenhum dos idiomas conhecidos conseguiu ler. */
     | 'UNPARSEABLE_DATE'
     /**

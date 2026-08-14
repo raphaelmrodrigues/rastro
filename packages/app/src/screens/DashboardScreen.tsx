@@ -35,6 +35,7 @@ interface Props {
   onOpenStats: () => void;
   onImportAgain: () => void;
   onOpenModes: () => void;
+  onOpenConta: () => void;
 }
 
 /** Dias apos os quais vale a pena reimportar. Abaixo disso, o diff diz pouco. */
@@ -48,6 +49,7 @@ export function DashboardScreen({
   onOpenStats,
   onImportAgain,
   onOpenModes,
+  onOpenConta,
 }: Props) {
   const { insights, diff } = reports;
   const diasDesdeImport = Math.floor((Date.now() - snapshot.importedAt) / 86_400_000);
@@ -184,6 +186,7 @@ export function DashboardScreen({
       <View style={s.actions}>
         <Button label="Existe um jeito sem arquivo?" variant="ghost" onPress={onOpenModes} />
         <Button label="Importar novo arquivo" variant="ghost" onPress={onImportAgain} />
+        <Button label="Sincronizar entre aparelhos" variant="ghost" onPress={onOpenConta} />
       </View>
     </ScrollView>
   );
