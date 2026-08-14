@@ -61,7 +61,7 @@ const PASSOS = [
 
 interface Props {
   onPickFile: () => void;
-  onOpenModes: () => void;
+  onAbrirSobreArquivo: () => void;
   importing?: boolean;
   /** Fração já lida do arquivo (0..1). O arquivo completo passa de 400 MB. */
   progress?: number;
@@ -73,7 +73,7 @@ interface Props {
 
 export function ImportGuideScreen({
   onPickFile,
-  onOpenModes,
+  onAbrirSobreArquivo,
   importing,
   progress,
   error,
@@ -127,15 +127,22 @@ export function ImportGuideScreen({
           </View>
         ))}
 
+        {/* `accessibilityRole` nos dois: sem ele o leitor de tela lê o texto
+            como parágrafo e não avisa que dá para tocar. */}
         <Pressable
           onPress={() => Linking.openURL('https://www.instagram.com/download/request/')}
+          accessibilityRole="link"
           style={({ pressed }) => pressed && s.pressed}
         >
           <Text style={s.linkSecundario}>Abrir a página de download do Instagram</Text>
         </Pressable>
 
-        <Pressable onPress={onOpenModes} style={({ pressed }) => pressed && s.pressed}>
-          <Text style={s.linkSecundario}>Dá para usar sem baixar esse arquivo?</Text>
+        <Pressable
+          onPress={onAbrirSobreArquivo}
+          accessibilityRole="button"
+          style={({ pressed }) => pressed && s.pressed}
+        >
+          <Text style={s.linkSecundario}>Por que preciso desse arquivo?</Text>
         </Pressable>
       </ScrollView>
 

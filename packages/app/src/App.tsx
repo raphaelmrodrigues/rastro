@@ -42,7 +42,7 @@ import { DashboardScreen, type ListaId } from './screens/DashboardScreen';
 import { PessoasScreen } from './screens/PessoasScreen';
 import { PeopleListScreen, TITULOS } from './screens/PeopleListScreen';
 import { StatsScreen } from './screens/StatsScreen';
-import { ModesScreen } from './screens/ModesScreen';
+import { SobreOArquivoScreen } from './screens/SobreOArquivoScreen';
 import { PerfilScreen } from './screens/PerfilScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { Header, TabBar, type Aba } from './components/Chrome';
@@ -52,7 +52,7 @@ import { useConta } from './lib/conta';
 import { colors, space, typography } from './lib/theme';
 
 /** Tela empilhada sobre a aba atual. `null` = a própria aba. */
-type Empilhada = { nome: 'lista'; lista: ListaId } | { nome: 'stats' } | { nome: 'modos' } | null;
+type Empilhada = { nome: 'lista'; lista: ListaId } | { nome: 'stats' } | { nome: 'arquivo' } | null;
 
 /**
  * Aviso ao usuário. O Alert do react-native-web é um no-op silencioso, e um erro
@@ -152,22 +152,42 @@ export default function App() {
   // Sem nenhum arquivo ainda, o app tem uma coisa só a oferecer. Mostrar abas
   // vazias seria dar cinco caminhos que não levam a lugar nenhum.
   if (semDados) {
+    /*
+     * A ordem aqui importa e já causou bug: a versão anterior testava
+     * `aba === 'perfil'` antes da tela empilhada. Abrir "Sobre o arquivo" a
+     * partir do perfil marcava o estado mas não trocava a tela — parecia um
+     * toque ignorado —, e a tela ficava pendurada até a próxima troca de aba,
+     * quando aparecia no lugar errado. A tela empilhada vem sempre primeiro,
+     * como no bloco de baixo.
+     */
+    const noArquivo = empilhada?.nome === 'arquivo';
+    const noPerfil = aba === 'perfil';
+
     return (
       <Raiz>
-        <Header acao={<AtalhoPerfil onPress={() => setAba('perfil')} />} />
-        {aba === 'perfil' ? (
+        {noArquivo || noPerfil ? (
+          <Header
+            titulo={noArquivo ? 'Sobre o arquivo' : 'Perfil'}
+            // Sem barra de abas nesta fase, o cabeçalho é a única saída.
+            onVoltar={noArquivo ? () => setEmpilhada(null) : () => setAba('importar')}
+          />
+        ) : (
+          <Header acao={<AtalhoPerfil onPress={() => setAba('perfil')} />} />
+        )}
+
+        {noArquivo ? (
+          <SobreOArquivoScreen />
+        ) : noPerfil ? (
           <PerfilScreen
             snapshotCount={snapshotCount}
             onImportar={() => setAba('importar')}
-            onAbrirModos={() => setEmpilhada({ nome: 'modos' })}
+            onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
           />
-        ) : empilhada?.nome === 'modos' ? (
-          <ModesScreen />
         ) : (
           <ImportGuideScreen
             primeiraVez
             onPickFile={escolherArquivo}
-            onOpenModes={() => setEmpilhada({ nome: 'modos' })}
+            onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
             importing={importando}
             progress={progress}
             error={error}
@@ -182,8 +202,8 @@ export default function App() {
       ? TITULOS[empilhada.lista].title
       : empilhada?.nome === 'stats'
         ? 'Evolução'
-        : empilhada?.nome === 'modos'
-          ? 'Outras formas'
+        : empilhada?.nome === 'arquivo'
+          ? 'Sobre o arquivo'
           : undefined;
 
   return (
@@ -199,8 +219,8 @@ export default function App() {
           <PeopleListScreen lista={empilhada.lista} insights={reports.insights} diff={reports.diff} />
         ) : empilhada?.nome === 'stats' ? (
           <StatsScreen reports={reports} snapshotCount={snapshotCount} />
-        ) : empilhada?.nome === 'modos' ? (
-          <ModesScreen />
+        ) : empilhada?.nome === 'arquivo' ? (
+          <SobreOArquivoScreen />
         ) : aba === 'inicio' ? (
           <DashboardScreen
             snapshot={snapshot}
@@ -219,7 +239,7 @@ export default function App() {
           <ImportGuideScreen
             primeiraVez={false}
             onPickFile={escolherArquivo}
-            onOpenModes={() => setEmpilhada({ nome: 'modos' })}
+            onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
             importing={importando}
             progress={progress}
             error={error}
@@ -230,7 +250,7 @@ export default function App() {
           <PerfilScreen
             snapshotCount={snapshotCount}
             onImportar={() => setAba('importar')}
-            onAbrirModos={() => setEmpilhada({ nome: 'modos' })}
+            onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
           />
         )}
       </View>

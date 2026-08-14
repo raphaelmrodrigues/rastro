@@ -25,10 +25,10 @@ interface Props {
   /** Quantos arquivos já foram enviados neste aparelho. */
   snapshotCount: number;
   onImportar: () => void;
-  onAbrirModos: () => void;
+  onAbrirSobreArquivo: () => void;
 }
 
-export function PerfilScreen({ snapshotCount, onImportar, onAbrirModos }: Props) {
+export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }: Props) {
   const { perfil, ocupado, erro, envio, sair, definirPerfil, enviarPendente } = useConta();
   const [handle, setHandle] = useState('');
 
@@ -91,7 +91,7 @@ export function PerfilScreen({ snapshotCount, onImportar, onAbrirModos }: Props)
 
       <SectionTitle>Seus dados</SectionTitle>
       <MenuRow label="Enviar um arquivo novo" onPress={onImportar} />
-      <MenuRow label="Como conseguir o arquivo" onPress={onAbrirModos} />
+      <MenuRow label="Como conseguir o arquivo" onPress={onAbrirSobreArquivo} />
 
       <View style={s.promessa}>
         <IconeEscudo size={20} />
