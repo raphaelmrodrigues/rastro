@@ -5,12 +5,16 @@
  * pasta do proprio app e so procura node_modules a partir dela. Num workspace as
  * dependencias ficam hasteadas na raiz e o core mora fora do diretorio do app.
  *
- * Os tres ajustes:
+ * Os dois ajustes:
  *  - watchFolders: a raiz do monorepo, para o Metro enxergar packages/core;
- *  - nodeModulesPaths: procura no app e depois na raiz;
- *  - disableHierarchicalLookup: evita o Metro subir por conta propria e pegar
- *    uma copia duplicada de react/react-native, o que gera o erro classico de
- *    "dois Reacts" (hooks invalidos) sem mensagem util.
+ *  - nodeModulesPaths: procura no app e depois na raiz.
+ *
+ * Havia um terceiro, `disableHierarchicalLookup = true`, que era a receita de
+ * monorepo ate o SDK 51. A partir do 52 o proprio `expo/metro-config` resolve
+ * isso, e manter a linha passou a ser o problema em vez da solucao: o
+ * `expo-doctor` do SDK 57 aponta o conflito explicitamente. O risco que ela
+ * evitava — duas copias de react/react-native, que dao "invalid hooks" sem
+ * mensagem util — hoje e coberto pelo dedupe do npm workspaces.
  */
 
 const { getDefaultConfig } = require('expo/metro-config');
@@ -26,6 +30,4 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
-config.resolver.disableHierarchicalLookup = true;
-
 module.exports = config;

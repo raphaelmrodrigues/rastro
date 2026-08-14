@@ -76,6 +76,14 @@ Responde à pergunta "dá para usar sem baixar o arquivo?". Ver `docs/MODO-CONEC
 - [ ] Assinatura via RevenueCat ou StoreKit/Play Billing direto
 - [ ] Definir o que fica no gratuito (ver `PRODUTO.md`)
 
+## Dívida técnica conhecida
+
+- [ ] **TypeScript 6.** O SDK 57 pede `~6.0.3` e o projeto está em 5.9.3 — é o
+      único item que o `expo-doctor` ainda aponta (19/20). Ficou de fora do
+      upgrade do SDK de propósito: TS 6 é uma migração transversal, atinge
+      `core` e `api` junto, e empilhá-la no mesmo commit tornaria impossível
+      dizer qual das duas quebrou o que. Fazer sozinha, depois.
+
 ## Ideias sem prazo
 
 - Detecção de rename assistida pelo usuário ("essa pessoa só mudou de @")

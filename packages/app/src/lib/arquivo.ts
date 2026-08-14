@@ -11,16 +11,21 @@
  * "confira se é o .zip", culpando um arquivo que estava perfeito. Por isso o
  * caminho web usa um <input type="file"> próprio e fica com o objeto File, que
  * o navegador lê por fatia, sem cópia.
+ *
+ * ## A leitura no aparelho, depois do SDK 57
+ *
+ * A API antiga do expo-file-system só entregava bytes como base64, e só devolvia
+ * o intervalo pedido se `position` e `length` fossem informados — o que obrigava
+ * a alinhar cada bloco em múltiplo de 3 para o padding não cair no meio da
+ * leitura e corromper a emenda. A API nova abre um `FileHandle` e lê bytes
+ * brutos numa posição arbitrária. Some a conversão, some o alinhamento, e some
+ * a classe de bug que vinha com eles.
  */
 
 import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
-import { bytesDeBase64 } from './base64';
+import { File } from 'expo-file-system';
 import type { FonteArquivo } from './zip';
-
-/** Múltiplo de 3: em base64 cada 3 bytes viram 4 chars sem padding no meio. */
-const ALINHAMENTO_BASE64 = 3;
 
 /** Devolve null quando o usuário desiste da escolha. */
 export async function escolherArquivoDoExport(): Promise<FonteArquivo | null> {
@@ -35,7 +40,7 @@ async function escolherNoNavegador(): Promise<FonteArquivo | null> {
   document.body.appendChild(input);
 
   try {
-    const arquivo = await new Promise<File | null>((resolve) => {
+    const arquivo = await new Promise<globalThis.File | null>((resolve) => {
       input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
       input.addEventListener('cancel', () => resolve(null), { once: true });
       input.click();
@@ -66,28 +71,22 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
   const escolhido = resultado.canceled ? undefined : resultado.assets?.[0];
   if (!escolhido) return null;
 
-  const info = await FileSystem.getInfoAsync(escolhido.uri, { size: true });
-  const tamanho =
-    escolhido.size ?? (info.exists && typeof info.size === 'number' ? info.size : 0);
+  const arquivo = new File(escolhido.uri);
+  const tamanho = escolhido.size ?? arquivo.size;
+
+  // Um handle só para o import inteiro: reabrir a cada bloco custaria uma syscall
+  // por 3 MB, e num export de 479 MB isso são ~160 aberturas desnecessárias.
+  const handle = arquivo.open();
 
   return {
     nome: escolhido.name ?? 'export.zip',
     tamanho,
     async ler(inicio, fim) {
-      // O expo-file-system só entrega bytes via base64, e só devolve o intervalo
-      // pedido se position e length forem informados. Alinhar em múltiplo de 3
-      // evita padding no meio da leitura, que corromperia a emenda dos blocos.
-      const alinhado = fim - inicio;
-      const sobra = alinhado % ALINHAMENTO_BASE64;
-      const comprimento = sobra === 0 || fim >= tamanho ? alinhado : alinhado - sobra;
-
-      const base64 = await FileSystem.readAsStringAsync(escolhido.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-        position: inicio,
-        length: comprimento,
-      });
-
-      return bytesDeBase64(base64);
+      handle.offset = inicio;
+      return handle.readBytes(fim - inicio);
+    },
+    fechar() {
+      handle.close();
     },
   };
 }

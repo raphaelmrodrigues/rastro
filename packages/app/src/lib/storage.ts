@@ -11,11 +11,27 @@
  */
 
 import { Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import type { Snapshot } from '@rastro/core';
 
-const ROOT = `${FileSystem.documentDirectory}rastro/`;
-const INDEX_FILE = `${ROOT}index.json`;
+/**
+ * A API de arquivos mudou no SDK 54: `documentDirectory` + funções soltas viraram
+ * as classes `Directory` e `File`. A antiga ainda existe em
+ * `expo-file-system/legacy`, mas importar de lá seria adiar a migração para uma
+ * versão em que ela já não exista — e este arquivo tem seis chamadas, não
+ * sessenta.
+ *
+ * Diferença que importa ao ler o código: `exists`, `create`, `write` e `delete`
+ * são síncronos agora; só a leitura de conteúdo (`text()`) é assíncrona.
+ *
+ * Tudo aqui é função, e não constante de módulo, por causa do navegador: no web o
+ * expo-file-system é um esboço que lança em `Paths.document`. Um
+ * `const ROOT = new Directory(...)` no topo do arquivo roda na importação, antes
+ * de qualquer `if (isWeb)` — e derruba o app inteiro numa tela branca, mesmo no
+ * caminho que nunca tocaria em disco.
+ */
+const raiz = () => new Directory(Paths.document, 'rastro');
+const arquivoDoIndice = (root: Directory) => new File(root, 'index.json');
 
 /** Quantos snapshots completos ficam no aparelho. */
 const MAX_SNAPSHOTS = 12;
@@ -60,9 +76,11 @@ export interface SnapshotIndexEntry {
   hasWarnings: boolean;
 }
 
-async function ensureRoot(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(ROOT);
-  if (!info.exists) await FileSystem.makeDirectoryAsync(ROOT, { intermediates: true });
+/** Garante o diretorio e devolve ele; so pode ser chamada fora do web. */
+function ensureRoot(): Directory {
+  const root = raiz();
+  if (!root.exists) root.create({ intermediates: true });
+  return root;
 }
 
 export async function readIndex(): Promise<SnapshotIndexEntry[]> {
@@ -72,9 +90,8 @@ export async function readIndex(): Promise<SnapshotIndexEntry[]> {
     if (isWeb) {
       raw = webStore.read('index');
     } else {
-      await ensureRoot();
-      const info = await FileSystem.getInfoAsync(INDEX_FILE);
-      raw = info.exists ? await FileSystem.readAsStringAsync(INDEX_FILE) : null;
+      const arquivo = arquivoDoIndice(ensureRoot());
+      raw = arquivo.exists ? await arquivo.text() : null;
     }
 
     if (!raw) return [];
@@ -88,10 +105,12 @@ export async function readIndex(): Promise<SnapshotIndexEntry[]> {
 
 export async function loadSnapshot(id: string): Promise<Snapshot | null> {
   try {
-    const raw = isWeb
-      ? webStore.read(id)
-      : await FileSystem.readAsStringAsync(`${ROOT}${id}.json`);
-    return raw ? (JSON.parse(raw) as Snapshot) : null;
+    if (isWeb) {
+      const raw = webStore.read(id);
+      return raw ? (JSON.parse(raw) as Snapshot) : null;
+    }
+    const arquivo = new File(raiz(), `${id}.json`);
+    return arquivo.exists ? (JSON.parse(await arquivo.text()) as Snapshot) : null;
   } catch {
     return null;
   }
@@ -101,11 +120,16 @@ export async function loadSnapshot(id: string): Promise<Snapshot | null> {
 export async function saveSnapshot(snapshot: Snapshot): Promise<void> {
   const serialized = JSON.stringify(snapshot);
 
-  if (isWeb) {
+  // Uma raiz so para a funcao inteira: no web ela nem e construida.
+  const root = isWeb ? null : ensureRoot();
+
+  if (root === null) {
     webStore.write(snapshot.id, serialized);
   } else {
-    await ensureRoot();
-    await FileSystem.writeAsStringAsync(`${ROOT}${snapshot.id}.json`, serialized);
+    const arquivo = new File(root, `${snapshot.id}.json`);
+    // `create` so quando falta: gravar sobre um arquivo existente lança.
+    if (!arquivo.exists) arquivo.create();
+    arquivo.write(serialized);
   }
 
   const entry: SnapshotIndexEntry = {
@@ -123,13 +147,24 @@ export async function saveSnapshot(snapshot: Snapshot): Promise<void> {
 
   const kept = index.slice(0, MAX_SNAPSHOTS);
   for (const dropped of index.slice(MAX_SNAPSHOTS)) {
-    if (isWeb) webStore.remove(dropped.id);
-    else await FileSystem.deleteAsync(`${ROOT}${dropped.id}.json`, { idempotent: true });
+    if (root === null) {
+      webStore.remove(dropped.id);
+    } else {
+      const antigo = new File(root, `${dropped.id}.json`);
+      // `exists` antes de apagar: a API nova lança se o arquivo não estiver lá,
+      // e a antiga tinha `idempotent: true` para exatamente este caso.
+      if (antigo.exists) antigo.delete();
+    }
   }
 
   const serializedIndex = JSON.stringify(kept);
-  if (isWeb) webStore.write('index', serializedIndex);
-  else await FileSystem.writeAsStringAsync(INDEX_FILE, serializedIndex);
+  if (root === null) {
+    webStore.write('index', serializedIndex);
+  } else {
+    const indice = arquivoDoIndice(root);
+    if (!indice.exists) indice.create();
+    indice.write(serializedIndex);
+  }
 }
 
 /**
@@ -138,6 +173,10 @@ export async function saveSnapshot(snapshot: Snapshot): Promise<void> {
  * aparelho sem desinstalar nada.
  */
 export async function eraseEverything(): Promise<void> {
-  if (isWeb) webStore.clear();
-  else await FileSystem.deleteAsync(ROOT, { idempotent: true });
+  if (isWeb) {
+    webStore.clear();
+    return;
+  }
+  const root = raiz();
+  if (root.exists) root.delete();
 }

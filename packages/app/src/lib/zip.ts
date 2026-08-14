@@ -23,6 +23,11 @@ export interface FonteArquivo {
   tamanho: number;
   /** Lê o intervalo [inicio, fim) do arquivo. */
   ler(inicio: number, fim: number): Promise<Uint8Array>;
+  /**
+   * Libera o recurso, quando a fonte segura algum. O aparelho mantém um
+   * FileHandle aberto durante todo o import; o navegador não segura nada.
+   */
+  fechar?(): void;
 }
 
 export class ArquivoNaoEhZip extends Error {
@@ -36,9 +41,13 @@ export class ArquivoNaoEhZip extends Error {
 }
 
 /**
- * Múltiplo de 3 de propósito: no aparelho os bytes chegam via base64, e um bloco
- * que não fecha em grupo de 3 sai com padding no meio — a emenda com o bloco
- * seguinte quebraria o zip.
+ * Tamanho do bloco lido por vez. É o pico de memória do import.
+ *
+ * Era múltiplo de 3 por obrigação: no aparelho os bytes chegavam em base64, e um
+ * bloco fora do grupo de 3 saía com padding no meio, quebrando a emenda com o
+ * bloco seguinte. Desde o SDK 57 a leitura é de bytes brutos e essa restrição
+ * não existe mais — o valor fica por ser um meio-termo razoável entre número de
+ * leituras e memória.
  */
 const TAMANHO_BLOCO = 3 * 1024 * 1024;
 
@@ -56,6 +65,20 @@ const ASSINATURAS = [
  * segundos e uma tela parada nesse tempo parece travada.
  */
 export async function extrairDoZip(
+  fonte: FonteArquivo,
+  interessa: (nome: string) => boolean,
+  aoProgredir?: (fracao: number) => void,
+): Promise<Record<string, string>> {
+  try {
+    return await lerZip(fonte, interessa, aoProgredir);
+  } finally {
+    // Vale para erro também: um FileHandle vazado segura o arquivo no cache do
+    // aparelho até o processo morrer.
+    fonte.fechar?.();
+  }
+}
+
+async function lerZip(
   fonte: FonteArquivo,
   interessa: (nome: string) => boolean,
   aoProgredir?: (fracao: number) => void,

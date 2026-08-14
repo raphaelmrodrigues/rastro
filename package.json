@@ -21,9 +21,5 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "@expo/metro-runtime": "~3.2.3",
-    "react-dom": "18.2.0",
-    "react-native-web": "~0.19.10"
-  }
+  "_comment_deps": "A raiz não declara dependências de propósito. @expo/metro-runtime, react-dom e react-native-web moravam aqui e em packages/app ao mesmo tempo, cada um numa versão — e o npm resolvia o conflito instalando React 18 na raiz e 19 no app, o que impedia o upgrade do SDK. Dependência de aplicação pertence ao workspace que a usa."
 }
