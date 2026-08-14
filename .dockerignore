@@ -1,0 +1,28 @@
+# Nada de node_modules do host: são de outro SO e outra arquitetura.
+node_modules
+**/node_modules
+dist
+**/dist
+.expo
+**/.expo
+
+.git
+.github
+.idea
+.vscode
+.claude
+
+# Dados de export. Não existe motivo para o contexto de build ver a rede social
+# de alguém — e o contexto vai inteiro para o daemon do Docker.
+instagram*/
+*.zip
+fixtures/real/
+uploads/
+
+.env
+.env.*
+!.env.example
+
+docs
+README.md
+*.md

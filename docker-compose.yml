@@ -1,0 +1,55 @@
+# Rastro — API + Postgres.
+#
+# Serve para dois usos: subir o ambiente completo na máquina de desenvolvimento
+# (`docker compose up`) e como base do deploy no Dokploy.
+#
+# Se no Dokploy você criar o Postgres pela UI (Databases → PostgreSQL), apague o
+# serviço `db` daqui e aponte DATABASE_URL para o host interno que a UI mostra.
+# A UI dá backup agendado e restauração em um clique, que este compose não tem.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4891
+      DATABASE_URL: ${DATABASE_URL:-postgres://rastro:rastro@db:5432/rastro}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?defina TOKEN_ENCRYPTION_KEY}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-600}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID:-}
+      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET:-}
+      INSTAGRAM_REDIRECT_URI: ${INSTAGRAM_REDIRECT_URI:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Sem `ports:` de propósito. Quem publica é o Traefik do Dokploy, com
+    # domínio e TLS. Abrir 4891 na VPS deixa a API acessível por HTTP puro, e aí
+    # o JWT e a lista de seguidores de todo mundo trafegam em texto claro.
+    expose:
+      - '4891'
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rastro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-rastro}
+    volumes:
+      - rastro_db:/var/lib/postgresql/data
+    # Idem: o banco não fica exposto. Para acessar de fora, túnel SSH:
+    #   ssh -L 5432:localhost:5432 usuario@147.79.87.169
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-rastro} -d ${POSTGRES_DB:-rastro}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  rastro_db:
