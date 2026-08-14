@@ -57,8 +57,15 @@ function origensPermitidas(): string[] {
     .map((o) => o.trim())
     .filter(Boolean);
   if (configuradas.length > 0) return configuradas;
-  // Sem configuração, só o desenvolvimento local. Produção precisa declarar.
-  return ['http://localhost:8081', 'http://localhost:19006'];
+  /*
+   * Sem configuração, só o desenvolvimento local. Produção precisa declarar.
+   *
+   * 8391 é a porta fixada nos scripts de `packages/app` — o padrão 8081 do Metro
+   * colidia com outra aplicação na máquina do dono. Se mudar lá, mude aqui: o
+   * sintoma de esquecer é o app carregar normalmente e só o login falhar, com
+   * erro de CORS que não aparece na tela.
+   */
+  return ['http://localhost:8391'];
 }
 
 export async function buildServer() {
