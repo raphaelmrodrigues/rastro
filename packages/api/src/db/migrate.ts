@@ -23,7 +23,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sql } from './client.js';
 
 /** Número arbitrário, só precisa ser o mesmo em todos os processos. */
@@ -87,7 +87,16 @@ export async function migrate(log: (msg: string) => void = console.log): Promise
   log('banco atualizado');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/*
+ * "Fui executado direto, e não importado?"
+ *
+ * `file://${process.argv[1]}` funciona no Linux e falha no Windows, onde o
+ * argumento vem como `C:\...\migrate.js` e a URL como `file:///C:/.../migrate.js`.
+ * A comparação dava falso, nada rodava, e o processo terminava com código 0 e
+ * nenhuma mensagem — um silêncio idêntico ao de um sucesso. `pathToFileURL`
+ * normaliza os dois lados.
+ */
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   await migrate();
   await sql.end();
 }

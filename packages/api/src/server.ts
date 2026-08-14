@@ -13,6 +13,7 @@
  * valendo inteiras.
  */
 
+import { pathToFileURL } from 'node:url';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import jwt from '@fastify/jwt';
@@ -123,7 +124,9 @@ export async function buildServer() {
 }
 
 // TODO(claude-code): mover para um bootstrap separado quando adicionarmos testes de integração.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Sobre `pathToFileURL` em vez de `file://${...}`: ver a nota em db/migrate.ts.
+// Com a comparação antiga o servidor não subia no Windows e saía com código 0.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const app = await buildServer();
   startMetricsScheduler(app.log);
   await app.listen({ port: PORT, host: '0.0.0.0' });

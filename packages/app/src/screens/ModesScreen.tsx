@@ -14,7 +14,7 @@
 
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CONNECTED_MODE_REQUIREMENTS, MODE_CAPABILITIES } from '@rastro/core';
-import { Banner, Button, SectionTitle } from '../components/ui';
+import { Banner, SectionTitle } from '../components/ui';
 import { colors, radius, space, typography } from '../lib/theme';
 
 const MARCA: Record<'yes' | 'no' | 'partial', { simbolo: string; cor: string }> = {
@@ -23,10 +23,10 @@ const MARCA: Record<'yes' | 'no' | 'partial', { simbolo: string; cor: string }> 
   partial: { simbolo: '≈', cor: colors.approximate },
 };
 
-export function ModesScreen({ onBack }: { onBack: () => void }) {
+/** O voltar fica no cabeçalho, montado pelo App — a tela não desenha o seu. */
+export function ModesScreen() {
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
-      <Button label="Voltar" variant="ghost" onPress={onBack} />
       <Text style={s.title}>Dá para usar sem baixar o arquivo?</Text>
       <Text style={s.lead}>
         Em parte. O Instagram tem uma API oficial que entrega números — quantos

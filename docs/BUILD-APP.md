@@ -8,10 +8,23 @@ Todos os comandos rodam de dentro de `packages/app`.
 
 ---
 
-## 1. Expo Go — sem build, hoje, iPhone e Android
+## 1. Expo Go — não serve mais para este projeto
 
-O jeito de ver o app rodando no aparelho agora. Não gera `.apk` nem `.ipa`: o
-Expo Go é um app hospedeiro que baixa o seu JavaScript e executa.
+> **Verificado em 14/08/2026 e o resultado foi negativo.** A App Store publica o
+> Expo Go **54.0.2**, de 23/09/2025, e a Play Store o **54.0.8**. O projeto está
+> no SDK 57, e o Expo Go recusa projetos mais novos que ele com a mensagem
+> "Project is incompatible with this version of Expo Go".
+>
+> Não adianta procurar atualização: ela não existe. A Expo congelou o Expo Go no
+> SDK 54 nas duas lojas e passou a tratar o *development build* (opção 2 abaixo)
+> como o caminho principal.
+>
+> O texto abaixo fica registrado porque descreve como o Expo Go funcionaria, e
+> porque voltaria a valer se o projeto fosse rebaixado para o SDK 54 — o que
+> significaria ficar preso a uma versão que a Expo já abandonou no cliente.
+
+O Expo Go é um app hospedeiro que baixa o seu JavaScript e executa, sem gerar
+`.apk` nem `.ipa`.
 
 ```bash
 cd packages/app
@@ -80,8 +93,15 @@ recusa qualquer coisa fora disso. Não é limitação do Expo; é da plataforma.
 
 As opções reais, em ordem de custo:
 
-### a) Expo Go — grátis, funciona hoje
-É a opção 1 acima. Para desenvolver e testar o Rastro no seu iPhone, resolve.
+### a) O app pela web — grátis, funciona hoje
+Com `npx expo start --web` rodando, abra o IP da máquina na rede (não
+`localhost`) no Safari do iPhone. Roda tudo, inclusive o import do arquivo. Não
+exercita SecureStore, notificações nem a leitura nativa de arquivo.
+
+Duas ressalvas: o `CORS_ORIGINS` do servidor precisa incluir essa origem, senão
+login e sincronização falham (as telas de análise funcionam mesmo assim, porque
+são locais); e o import do arquivo de 479 MB nunca foi testado no Safari de um
+iPhone — pode esbarrar no limite de memória.
 
 ### b) Conta Apple gratuita + Xcode — grátis, exige um Mac, expira em 7 dias
 Com um Apple ID comum, o Xcode assina e instala o app no seu iPhone ligado por
@@ -106,9 +126,9 @@ npx eas-cli build --platform ios --profile preview
 O link abre no Safari do iPhone e instala. O app dura um ano, não sete dias.
 É também o mesmo caminho para TestFlight e, depois, para a App Store.
 
-**Resumo prático:** para testar agora no seu iPhone, use o Expo Go. A assinatura
-de USD 99/ano só se torna necessária quando você quiser instalar em aparelhos de
-amigos sem o Expo Go, ou publicar.
+**Resumo prático:** no Android, o development build resolve de graça. No iPhone,
+com o Expo Go fora de jogo, sobra a web enquanto não houver a assinatura de
+USD 99/ano — que é necessária de qualquer forma para publicar na App Store.
 
 ---
 
@@ -126,8 +146,10 @@ amigos sem o Expo Go, ou publicar.
   hook o bundle não encontra o core e o build falha com um erro de resolução de
   módulo que não diz o que houve.
 
+- **Ícone e splash** — `packages/app/assets`, gerados por
+  `npm run icones --workspace @rastro/app` a partir do mesmo desenho da marca.
+  Rode de novo sempre que mexer em `src/components/Marca.tsx`.
+
 ## O que ainda falta antes de publicar
 
-- **Ícone e splash screen.** Não existe `packages/app/assets`, então o app usa o
-  ícone padrão do Expo. Irrelevante para testar, obrigatório para a loja.
 - Política de privacidade e os demais itens do Marco 4 no `ROADMAP.md`.

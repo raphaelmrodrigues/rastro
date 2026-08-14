@@ -128,8 +128,19 @@ npm run dev:app          # sobe o Expo
 
 ## 9. Estado atual
 
-O `core` está completo e validado contra um export real (60 testes). A `api` está
-implementada. O `app` funciona offline no aparelho. O que falta está em `docs/ROADMAP.md`.
+O `core` está completo e validado contra um export real (76 testes). A `api` está
+implementada e rodando em produção. O que falta está em `docs/ROADMAP.md`.
+
+**Conta obrigatória (decisão do dono, 14/08/2026).** Até essa data o app funcionava
+inteiro sem conta e a sincronização era opt-in. Hoje nenhuma tela abre sem sessão: quem
+não entra vê apenas `screens/AuthScreen.tsx`. O processamento continua acontecendo no
+aparelho — o `.zip` nunca sai dele, e o que sobe é a lista já processada —, mas isso
+deixou de ser uma escolha do usuário e por isso **não deve mais ser explicado na
+interface**. Explicar uma decisão que a pessoa não toma é ruído.
+
+O que **não** mudou, e não pode mudar: a senha pedida na entrada é a do Rastro. A regra 1
+continua inteira, e a tela de entrada afirma isso acima dos campos, porque o usuário chega
+de apps que pedem a senha do Instagram e vai supor que aqui é igual.
 
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.

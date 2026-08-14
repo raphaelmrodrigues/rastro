@@ -9,7 +9,8 @@
 import { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Account, Relationship, SnapshotDiff, SnapshotInsights } from '@rastro/core';
-import { Banner, Button, EmptyState, PersonRow } from '../components/ui';
+import { Banner, EmptyState, PersonRow } from '../components/ui';
+import { IconeBusca } from '../components/icons';
 import { colors, radius, space, typography } from '../lib/theme';
 import { describeEvent, formatDate, formatRelative } from '../lib/format';
 import { abrirPerfil } from '../lib/perfil';
@@ -27,25 +28,31 @@ interface Props {
   lista: ListaId;
   insights: SnapshotInsights;
   diff: SnapshotDiff | null;
-  onBack: () => void;
 }
 
-const TITULOS: Record<ListaId, { title: string; explicacao: string }> = {
+/**
+ * Título e explicação de cada recorte.
+ *
+ * A explicação é uma frase, não um parágrafo: quem abriu esta tela quer ver os
+ * nomes, e um texto longo antes da lista é um obstáculo entre a pessoa e o que
+ * ela veio buscar. O que sobreviveu ao corte foi só o que muda a interpretação
+ * do que está sendo mostrado — sobretudo em "deixaram de seguir", onde a data é
+ * aproximada e omitir isso induziria a conclusão errada.
+ */
+export const TITULOS: Record<ListaId, { title: string; explicacao: string }> = {
   'saíram': {
     title: 'Deixaram de seguir',
     explicacao:
-      'O app compara dois imports. Ele sabe que estas pessoas estavam na sua lista antes ' +
-      'e não estão agora — mas não sabe o dia exato em que cada uma saiu, só o intervalo.',
+      'Estas pessoas estavam na sua lista antes e não estão agora. A data é aproximada: ' +
+      'mostramos o intervalo entre as duas atualizações.',
   },
   entraram: {
     title: 'Novos seguidores',
-    explicacao:
-      'Aqui a data é exata: o próprio arquivo do Instagram registra o momento em que cada ' +
-      'pessoa passou a te seguir.',
+    explicacao: 'Aqui a data é exata — o próprio Instagram registra quando cada pessoa te seguiu.',
   },
   'nao-seguem-de-volta': {
     title: 'Não te seguem de volta',
-    explicacao: 'Você segue estas contas e elas não seguem você. A data é de quando você começou a seguir.',
+    explicacao: 'Você segue estas contas e elas não seguem você.',
   },
   'voce-nao-segue': {
     title: 'Você não segue de volta',
@@ -58,8 +65,8 @@ const TITULOS: Record<ListaId, { title: string; explicacao: string }> = {
   pendentes: {
     title: 'Solicitações pendentes',
     explicacao:
-      'Pedidos que você enviou e que nunca foram aceitos nem recusados. Os mais antigos ' +
-      'costumam ser de contas inativas — dá para limpar.',
+      'Pedidos que você enviou e que ninguém aceitou nem recusou. Os mais antigos costumam ' +
+      'ser de contas inativas.',
   },
 };
 
@@ -117,12 +124,12 @@ function toItems(lista: ListaId, insights: SnapshotInsights, diff: SnapshotDiff 
   }
 }
 
-export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
+export function PeopleListScreen({ lista, insights, diff }: Props) {
   const [busca, setBusca] = useState('');
-  // So aparece se o aparelho recusar tanto o app quanto o navegador. Raro, mas
-  // silenciar seria pior: o usuario ficaria tocando numa linha que nao responde.
+  // Só aparece se o aparelho recusar tanto o app quanto o navegador. Raro, mas
+  // silenciar seria pior: o usuário ficaria tocando numa linha que não responde.
   const [falhouAoAbrir, setFalhouAoAbrir] = useState(false);
-  const { title, explicacao } = TITULOS[lista];
+  const { explicacao } = TITULOS[lista];
 
   const items = useMemo(() => toItems(lista, insights, diff), [lista, insights, diff]);
   const filtrados = useMemo(() => {
@@ -142,23 +149,36 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
 
   return (
     <View style={s.screen}>
-      <View style={s.header}>
-        <Button label="Voltar" variant="ghost" onPress={onBack} />
-        <Text style={s.title}>{title}</Text>
-        <Text style={s.count}>
-          {filtrados.length}
-          {filtrados.length !== items.length ? ` de ${items.length}` : ''}
-        </Text>
-      </View>
-
       <FlatList
         data={filtrados}
         keyExtractor={(item) => item.username}
         contentContainerStyle={s.list}
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={s.listHeader}>
             <Text style={s.explicacao}>{explicacao}</Text>
-            <Text style={s.dica}>Toque em qualquer linha para abrir o perfil no Instagram.</Text>
+
+            {items.length > 0 ? (
+              <View style={s.buscaCaixa}>
+                <IconeBusca />
+                <TextInput
+                  style={s.buscaInput}
+                  value={busca}
+                  onChangeText={setBusca}
+                  placeholder="Buscar"
+                  placeholderTextColor={colors.inkFaint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  clearButtonMode="while-editing"
+                />
+              </View>
+            ) : null}
+
+            <Text style={s.count}>
+              {filtrados.length === items.length
+                ? `${items.length} ${items.length === 1 ? 'pessoa' : 'pessoas'}`
+                : `${filtrados.length} de ${items.length}`}
+            </Text>
 
             {falhouAoAbrir ? (
               <Banner
@@ -173,23 +193,8 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
 
             {renames.length > 0 ? (
               <Banner
-                title={`${renames.length} conta(s) só trocaram de @`}
-                body={
-                  'Elas continuam te seguindo, com outro nome de usuário. Não estão contadas ' +
-                  'como saída — a maioria dos apps do gênero conta, e o número fica errado.'
-                }
-              />
-            ) : null}
-
-            {items.length > 0 ? (
-              <TextInput
-                style={s.input}
-                value={busca}
-                onChangeText={setBusca}
-                placeholder="Buscar @ ou nome"
-                placeholderTextColor={colors.inkFaint}
-                autoCapitalize="none"
-                autoCorrect={false}
+                title={`${renames.length} ${renames.length === 1 ? 'conta trocou' : 'contas trocaram'} de @`}
+                body="Elas continuam te seguindo, só mudaram de nome de usuário. Não contamos como saída."
               />
             ) : null}
           </View>
@@ -210,7 +215,7 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
             body={
               busca
                 ? 'Nenhuma conta com esse termo.'
-                : 'Esta lista está vazia neste import — o que, dependendo da lista, é uma boa notícia.'
+                : 'Esta lista está vazia — o que, dependendo da lista, é uma boa notícia.'
             }
           />
         }
@@ -221,27 +226,30 @@ export function PeopleListScreen({ lista, insights, diff, onBack }: Props) {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.base },
-  header: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.xs },
-  title: { color: colors.ink, fontSize: typography.scale.title },
-  count: { color: colors.inkFaint, fontSize: typography.scale.caption },
-  list: { paddingHorizontal: space.lg, paddingBottom: space.xxl },
-  listHeader: { gap: space.sm, paddingBottom: space.sm },
-  explicacao: {
-    color: colors.inkMuted,
-    fontSize: typography.scale.caption,
-    lineHeight: 20,
-    marginTop: space.sm,
+  count: {
+    color: colors.inkFaint,
+    fontSize: typography.scale.micro,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
-  dica: { color: colors.inkFaint, fontSize: typography.scale.micro },
-  input: {
+  list: { paddingHorizontal: space.lg, paddingBottom: space.xl },
+  listHeader: { gap: space.sm, paddingTop: space.md, paddingBottom: space.xs },
+  explicacao: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 19 },
+
+  /** Busca no formato de campo arredondado, como nas listas de seguidores. */
+  buscaCaixa: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.ink,
     paddingHorizontal: space.md,
-    paddingVertical: space.sm + 2,
-    marginTop: space.sm,
+    marginTop: space.xs,
+  },
+  buscaInput: {
+    flex: 1,
+    color: colors.ink,
+    paddingVertical: space.sm + 4,
     fontSize: typography.scale.body,
   },
 });

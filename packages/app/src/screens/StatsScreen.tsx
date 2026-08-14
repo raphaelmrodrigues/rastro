@@ -13,14 +13,13 @@
 
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Reports } from '../lib/store';
-import { Banner, Button, SectionTitle } from '../components/ui';
+import { Banner, SectionTitle } from '../components/ui';
 import { colors, radius, space, typography } from '../lib/theme';
 import { formatDate, formatNumber, formatPercent, formatPeriod } from '../lib/format';
 
 interface Props {
   reports: Reports;
   snapshotCount: number;
-  onBack: () => void;
 }
 
 /** Barra horizontal proporcional ao maior valor da serie. */
@@ -43,7 +42,7 @@ function Bar({ label, value, max, tone }: { label: string; value: number; max: n
   );
 }
 
-export function StatsScreen({ reports, snapshotCount, onBack }: Props) {
+export function StatsScreen({ reports, snapshotCount }: Props) {
   const { byPeriod, cohorts, insights } = reports;
 
   const ultimosMeses = byPeriod.slice(-12);
@@ -52,8 +51,7 @@ export function StatsScreen({ reports, snapshotCount, onBack }: Props) {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
-      <Button label="Voltar" variant="ghost" onPress={onBack} />
-      <Text style={s.title}>Estatísticas</Text>
+      <Text style={s.title}>Evolução</Text>
 
       <SectionTitle>Quando as pessoas te seguiram</SectionTitle>
       <Text style={s.explicacao}>
