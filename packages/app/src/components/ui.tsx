@@ -173,6 +173,15 @@ export function PersonRow({
   approximate,
   badge,
   onPress,
+  /**
+   * Se o rótulo é um @ do Instagram.
+   *
+   * Falso nas listas do export completo, onde a linha pode ser o nome de uma
+   * pessoa numa conversa ("Ana Ribeiro") ou de uma empresa ("Loja X") — o
+   * arquivo de conversa não traz @, e anunciante não tem. Escrever "@Ana
+   * Ribeiro" faria a linha parecer um perfil que não existe.
+   */
+  comoArroba = true,
 }: {
   username: string;
   displayName?: string;
@@ -181,13 +190,16 @@ export function PersonRow({
   approximate?: boolean;
   badge?: string;
   onPress?: () => void;
+  comoArroba?: boolean;
 }) {
+  const rotulo = comoArroba ? `@${username}` : username;
+
   const conteudo = (pressionado: boolean) => (
     <View style={[s.person, pressionado && s.personPressed]}>
       <Avatar username={username} />
       <View style={s.personText}>
         <Text style={s.personHandle} numberOfLines={1}>
-          @{username}
+          {rotulo}
         </Text>
         {displayName ? (
           <Text style={s.personName} numberOfLines={1}>
@@ -215,7 +227,7 @@ export function PersonRow({
     <Pressable
       onPress={onPress}
       accessibilityRole="link"
-      accessibilityLabel={`Abrir o perfil de ${username} no Instagram`}
+      accessibilityLabel={`Abrir o perfil de ${rotulo} no Instagram`}
     >
       {({ pressed }) => conteudo(pressed)}
     </Pressable>

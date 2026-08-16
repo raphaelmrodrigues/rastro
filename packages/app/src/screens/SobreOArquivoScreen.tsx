@@ -71,6 +71,44 @@ export function SobreOArquivoScreen() {
         alguém saiu "em algum dia daquele mês".
       </Text>
 
+      {/*
+       * Os dois tamanhos de pedido.
+       *
+       * Escrito aqui, e não só na tela de Atividade, porque é aqui que a pessoa
+       * chega quando quer entender o arquivo — inclusive vinda do convite da
+       * Atividade, que aponta para cá.
+       *
+       * A frase sobre as 48h precisa deixar explícito de quem é a demora. Quem
+       * lê "pode levar 48 horas" numa tela de app assume que o app vai processar
+       * por 48 horas, desiste, e conta para os outros que o app é lento.
+       */}
+      <Text style={s.secao}>Existem dois tamanhos de pedido</Text>
+      <Text style={s.corpo}>
+        Ao pedir seus dados, o Instagram deixa você escolher o que incluir. O app funciona com o
+        pedido pequeno, e é ele que recomendamos para começar.
+      </Text>
+
+      <Text style={s.pergunta}>Só "Seguidores e seguindo" — o recomendado</Text>
+      <Text style={s.corpo}>
+        É o que os passos acima pedem. No teste que fizemos, deu menos de 1 MB e o Instagram
+        preparou em poucos minutos. Cobre tudo que o app faz hoje: quem saiu, quem entrou, quem
+        não te segue de volta.
+      </Text>
+
+      <Text style={s.pergunta}>"Todas as informações" — o pedido completo</Text>
+      <Text style={s.corpo}>
+        Libera a parte de conversas e atividade: quais conversas ficaram sem sua resposta, de
+        quem são os posts que você mais comenta, quais empresas têm seus dados e o que você
+        pesquisou. Em troca, o arquivo fica bem maior — no nosso teste, quase 500 MB — e{' '}
+        <Text style={s.enfase}>o Instagram pode levar até 48 horas para prepará-lo</Text>. Essa
+        espera é do Instagram montando o arquivo, não do app lendo: depois que você baixa, o
+        Rastro processa em segundos.
+      </Text>
+      <Text style={s.corpo}>
+        Você pode começar pelo pequeno e pedir o completo depois, quando quiser. Um não substitui
+        o outro, e enviar o completo não apaga seu histórico.
+      </Text>
+
       <Banner
         tone="warning"
         title="Cuidado com apps que dispensam o arquivo"
@@ -153,6 +191,8 @@ const s = StyleSheet.create({
     fontWeight: typography.weight.medium,
     marginBottom: space.xs,
   },
+  /** Destaque dentro de um parágrafo, para o custo não passar batido. */
+  enfase: { color: colors.ink, fontWeight: typography.weight.semibold },
 
   item: { flexDirection: 'row', gap: space.sm, marginBottom: space.xs },
   marcador: { color: colors.gained, fontSize: typography.scale.body, lineHeight: 21 },

@@ -1,15 +1,24 @@
 /**
  * Raiz do app.
  *
- * ## Conta obrigatória
+ * ## Conta opcional (16/08/2026)
  *
- * Nada abre sem sessão. Enquanto `conectado` é `null` a sessão ainda está sendo
- * restaurada e a tela mostra a marca; `false` leva à tela de entrada; só `true`
- * dá acesso ao resto. Isso é decisão de produto do dono, tomada em 14/08/2026 —
- * antes disso o app funcionava inteiro offline e a conta era opcional.
+ * O app abre e funciona inteiro sem conta: o import, o diff, as listas e as
+ * estatísticas rodam sobre arquivos no próprio aparelho. A conta existe para
+ * guardar o histórico fora do celular, trocar de aparelho sem perder nada e,
+ * adiante, o plano pago.
  *
- * Consequência que precisa continuar verdadeira: a senha pedida na entrada é a
- * do **Rastro**, nunca a do Instagram, e a tela diz isso antes dos campos. Um
+ * Entre 14 e 16/08/2026 a conta foi obrigatória e esta raiz bloqueava tudo numa
+ * tela de login. A reversão é de produto: exigir cadastro antes de a pessoa ver
+ * qualquer resultado punha uma parede no começo de um funil que já tem uma
+ * espera de até 48h do Instagram no meio, e nenhuma função do app precisava
+ * disso para funcionar.
+ *
+ * Onde a conta é oferecida agora: num convite depois do import (`ConviteDeConta`)
+ * e no Perfil, sempre. Nunca antes de o app ter entregue alguma coisa.
+ *
+ * Consequência que precisa continuar verdadeira: a senha pedida é a do
+ * **Rastro**, nunca a do Instagram, e a tela diz isso antes dos campos. Um
  * formulário de login num app de seguidores é exatamente o que o usuário viu nos
  * apps que queimaram a conta dele.
  *
@@ -24,7 +33,7 @@
  * seguidores é longa.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -43,17 +52,34 @@ import { PessoasScreen } from './screens/PessoasScreen';
 import { PeopleListScreen, TITULOS } from './screens/PeopleListScreen';
 import { StatsScreen } from './screens/StatsScreen';
 import { SobreOArquivoScreen } from './screens/SobreOArquivoScreen';
+import { AtividadeScreen } from './screens/AtividadeScreen';
+import {
+  AtividadeListaScreen,
+  TITULOS_ATIVIDADE,
+  type ListaDeAtividade,
+} from './screens/AtividadeListaScreen';
 import { PerfilScreen } from './screens/PerfilScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { AtualizarScreen } from './screens/AtualizarScreen';
 import { Header, TabBar, type Aba } from './components/Chrome';
 import { Logotipo } from './components/Marca';
+import { LimiteDeErro } from './components/LimiteDeErro';
+import { ConviteDeConta } from './components/ConviteDeConta';
 import { useStore } from './lib/store';
 import { useConta } from './lib/conta';
+import { useBotaoVoltar } from './lib/voltar';
+import { prepararNotificacoes, reagendarLembrete } from './lib/notificacoes';
 import { colors, space, typography } from './lib/theme';
 
 /** Tela empilhada sobre a aba atual. `null` = a própria aba. */
-type Empilhada = { nome: 'lista'; lista: ListaId } | { nome: 'stats' } | { nome: 'arquivo' } | null;
+type Empilhada =
+  | { nome: 'lista'; lista: ListaId }
+  | { nome: 'stats' }
+  | { nome: 'arquivo' }
+  | { nome: 'atividade' }
+  | { nome: 'atividadeLista'; lista: ListaDeAtividade }
+  | { nome: 'entrar'; modo: 'entrar' | 'cadastrar'; motivo?: string }
+  | null;
 
 /**
  * Aviso ao usuário. O Alert do react-native-web é um no-op silencioso, e um erro
@@ -83,22 +109,83 @@ function Raiz({ children }: { children: ReactNode }) {
   );
 }
 
-export default function App() {
+/**
+ * Envolve o app inteiro para que nenhum erro de tela vire tela branca.
+ *
+ * Fora do `App` de propósito: se o limite morasse dentro dele, um erro no
+ * próprio `App` — que é onde mora a navegação — passaria por cima do limite e o
+ * usuário veria o nada.
+ */
+export default function Rastro() {
+  return (
+    <LimiteDeErro>
+      <App />
+    </LimiteDeErro>
+  );
+}
+
+function App() {
   const [aba, setAba] = useState<Aba>('inicio');
   const [empilhada, setEmpilhada] = useState<Empilhada>(null);
   // Cobre o intervalo entre escolher o arquivo e a leitura começar. Num arquivo
   // completo isso é dezenas de segundos — sem indicador, parece que o botão não
   // funcionou e o usuário toca de novo.
   const [lendo, setLendo] = useState(false);
+  /*
+   * Convite dispensado nesta sessão.
+   *
+   * Zera a cada import: quem acabou de guardar mais um arquivo tem mais a
+   * perder, e o argumento fica mais forte. Insistir na mesma sessão depois de um
+   * "agora não" é o que faz o app parecer vendedor.
+   */
+  const [conviteDispensado, setConviteDispensado] = useState(false);
 
-  const { loading, importing, progress, snapshot, reports, snapshotCount, error, boot, importZip } =
+  const { loading, importing, progress, snapshot, reports, snapshotCount, atividade, error, boot, importZip } =
     useStore();
   const { conectado, perfil, iniciar, precisaAtualizar } = useConta();
 
   useEffect(() => {
     void boot();
     void iniciar();
+    // Só configura o canal e o comportamento em primeiro plano. Não pede
+    // permissão: isso só acontece quando a pessoa liga o lembrete no perfil.
+    void prepararNotificacoes();
   }, [boot, iniciar]);
+
+  /*
+   * Onde cada tela empilhada volta.
+   *
+   * A pilha tem dois níveis só na Atividade: dela saem cinco listas, e voltar de
+   * uma delas para o início — em vez de para a Atividade — faria o usuário
+   * refazer o caminho a cada lista que quisesse ver.
+   */
+  const voltarDe = useCallback((atual: Empilhada): Empilhada => {
+    if (atual?.nome === 'atividadeLista') return { nome: 'atividade' };
+    return null;
+  }, []);
+
+  /*
+   * Botão voltar do Android. Precisa ficar aqui em cima, antes de qualquer
+   * `return`, porque hook não pode ser condicional — e as telas de carregamento,
+   * login e atualização saem por `return` mais abaixo.
+   *
+   * A raiz devolve `false` de propósito: na tela inicial, voltar fecha o app,
+   * que é o que o usuário de Android espera. Nas telas de login e de atualização
+   * obrigatória não há para onde voltar, e `false` também é o certo.
+   */
+  const voltar = useCallback((): boolean => {
+    if (empilhada) {
+      setEmpilhada(voltarDe(empilhada));
+      return true;
+    }
+    if (aba !== 'inicio') {
+      setAba('inicio');
+      return true;
+    }
+    return false;
+  }, [empilhada, aba, voltarDe]);
+
+  useBotaoVoltar(voltar);
 
   const escolherArquivo = async () => {
     const fonte = await escolherArquivoDoExport();
@@ -111,6 +198,10 @@ export default function App() {
         avisar('Não deu para ler', message ?? 'Tente novamente.');
         return;
       }
+      // O relógio do lembrete parte da última atualização. Sem reancorar aqui,
+      // ele tocaria logo depois de a pessoa ter acabado de atualizar.
+      void reagendarLembrete(Date.now());
+      setConviteDispensado(false);
       setEmpilhada(null);
       setAba('inicio');
     } catch (erro) {
@@ -140,8 +231,14 @@ export default function App() {
     );
   }
 
-  // Sessão ainda sendo restaurada, ou dados locais ainda carregando.
-  if (conectado === null || loading) {
+  /*
+   * Espera só os dados locais, e não a sessão.
+   *
+   * A restauração de sessão depende de rede; prender a abertura do app nela faria
+   * quem está sem sinal olhar para a marca até o tempo limite estourar — para
+   * chegar num app que funciona offline de qualquer jeito.
+   */
+  if (loading) {
     return (
       <Raiz>
         <View style={s.centro}>
@@ -152,13 +249,22 @@ export default function App() {
     );
   }
 
-  if (!conectado) {
-    return (
-      <Raiz>
-        <AuthScreen />
-      </Raiz>
-    );
-  }
+  const tituloEmpilhada =
+    empilhada?.nome === 'lista'
+      ? TITULOS[empilhada.lista].title
+      : empilhada?.nome === 'stats'
+        ? 'Evolução'
+        : empilhada?.nome === 'arquivo'
+          ? 'Sobre o arquivo'
+          : empilhada?.nome === 'atividade'
+            ? 'Conversas e atividade'
+            : empilhada?.nome === 'atividadeLista'
+              ? TITULOS_ATIVIDADE[empilhada.lista].title
+              : empilhada?.nome === 'entrar'
+                ? empilhada.modo === 'cadastrar'
+                  ? 'Criar conta'
+                  : 'Entrar'
+                : undefined;
 
   const semDados = !snapshot || !reports;
   const importando = importing || lendo;
@@ -175,11 +281,14 @@ export default function App() {
      * como no bloco de baixo.
      */
     const noArquivo = empilhada?.nome === 'arquivo';
+    const naEntrada = empilhada?.nome === 'entrar';
     const noPerfil = aba === 'perfil';
 
     return (
       <Raiz>
-        {noArquivo || noPerfil ? (
+        {naEntrada ? (
+          <Header titulo={tituloEmpilhada} onVoltar={() => setEmpilhada(null)} />
+        ) : noArquivo || noPerfil ? (
           <Header
             titulo={noArquivo ? 'Sobre o arquivo' : 'Perfil'}
             // Sem barra de abas nesta fase, o cabeçalho é a única saída.
@@ -189,13 +298,22 @@ export default function App() {
           <Header acao={<AtalhoPerfil onPress={() => setAba('perfil')} />} />
         )}
 
-        {noArquivo ? (
+        {naEntrada ? (
+          <AuthScreen
+            modoInicial={empilhada.modo}
+            {...(empilhada.motivo ? { motivo: empilhada.motivo } : {})}
+            aoConcluir={() => setEmpilhada(null)}
+          />
+        ) : noArquivo ? (
           <SobreOArquivoScreen />
         ) : noPerfil ? (
           <PerfilScreen
             snapshotCount={snapshotCount}
+            ultimaAtualizacao={snapshot?.importedAt ?? null}
             onImportar={() => setAba('importar')}
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
+            onCriarConta={() => setEmpilhada({ nome: 'entrar', modo: 'cadastrar' })}
+            onEntrar={() => setEmpilhada({ nome: 'entrar', modo: 'entrar' })}
           />
         ) : (
           <ImportGuideScreen
@@ -211,30 +329,44 @@ export default function App() {
     );
   }
 
-  const tituloEmpilhada =
-    empilhada?.nome === 'lista'
-      ? TITULOS[empilhada.lista].title
-      : empilhada?.nome === 'stats'
-        ? 'Evolução'
-        : empilhada?.nome === 'arquivo'
-          ? 'Sobre o arquivo'
-          : undefined;
-
   return (
     <Raiz>
       {empilhada ? (
-        <Header titulo={tituloEmpilhada} onVoltar={() => setEmpilhada(null)} />
+        <Header titulo={tituloEmpilhada} onVoltar={() => setEmpilhada(voltarDe(empilhada))} />
       ) : (
         <Header acao={<AtalhoPerfil onPress={() => setAba('perfil')} />} />
       )}
 
       <View style={s.corpo}>
-        {empilhada?.nome === 'lista' ? (
-          <PeopleListScreen lista={empilhada.lista} insights={reports.insights} diff={reports.diff} />
+        {empilhada?.nome === 'entrar' ? (
+          <AuthScreen
+            modoInicial={empilhada.modo}
+            {...(empilhada.motivo ? { motivo: empilhada.motivo } : {})}
+            aoConcluir={() => setEmpilhada(null)}
+          />
+        ) : empilhada?.nome === 'lista' ? (
+          <PeopleListScreen
+            lista={empilhada.lista}
+            insights={reports.insights}
+            diff={reports.diff}
+            snapshot={snapshot}
+          />
         ) : empilhada?.nome === 'stats' ? (
           <StatsScreen reports={reports} snapshotCount={snapshotCount} />
         ) : empilhada?.nome === 'arquivo' ? (
           <SobreOArquivoScreen />
+        ) : empilhada?.nome === 'atividade' ? (
+          <AtividadeScreen
+            atividade={atividade}
+            onAbrir={(lista) => setEmpilhada({ nome: 'atividadeLista', lista })}
+            onComoConseguir={() => setEmpilhada({ nome: 'arquivo' })}
+          />
+        ) : empilhada?.nome === 'atividadeLista' ? (
+          // `atividade` não pode ser null aqui: a lista só é alcançável a partir
+          // da tela de atividade, que só mostra os atalhos quando há dados.
+          atividade ? (
+            <AtividadeListaScreen lista={empilhada.lista} atividade={atividade} />
+          ) : null
         ) : aba === 'inicio' ? (
           <DashboardScreen
             snapshot={snapshot}
@@ -243,11 +375,41 @@ export default function App() {
             onOpenList={(lista) => setEmpilhada({ nome: 'lista', lista })}
             onOpenStats={() => setEmpilhada({ nome: 'stats' })}
             onImportAgain={() => setAba('importar')}
+            onOpenAtividade={() => setEmpilhada({ nome: 'atividade' })}
+            conversasPendentes={
+              atividade ? atividade.conversations.filter((c) => c.awaitingYou).length : null
+            }
+            convite={
+              /*
+               * O convite só existe para quem não tem conta, e só depois do
+               * import — que é o momento em que a pessoa acabou de ver a própria
+               * rede na tela e passa a ter algo concreto a perder.
+               */
+              conectado === true || conviteDispensado ? null : (
+                <ConviteDeConta
+                  snapshotCount={snapshotCount}
+                  onCriarConta={() =>
+                    setEmpilhada({
+                      nome: 'entrar',
+                      modo: 'cadastrar',
+                      motivo: 'Guarde seu histórico fora deste celular.',
+                    })
+                  }
+                  onEntrar={() => setEmpilhada({ nome: 'entrar', modo: 'entrar' })}
+                  onDispensar={() => setConviteDispensado(true)}
+                />
+              )
+            }
           />
         ) : aba === 'pessoas' ? (
           <PessoasScreen
             reports={reports}
+            snapshot={snapshot}
             onOpenList={(lista) => setEmpilhada({ nome: 'lista', lista })}
+            onOpenAtividade={() => setEmpilhada({ nome: 'atividade' })}
+            conversasPendentes={
+              atividade ? atividade.conversations.filter((c) => c.awaitingYou).length : null
+            }
           />
         ) : aba === 'importar' ? (
           <ImportGuideScreen
@@ -263,8 +425,11 @@ export default function App() {
         ) : (
           <PerfilScreen
             snapshotCount={snapshotCount}
+            ultimaAtualizacao={snapshot.importedAt}
             onImportar={() => setAba('importar')}
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
+            onCriarConta={() => setEmpilhada({ nome: 'entrar', modo: 'cadastrar' })}
+            onEntrar={() => setEmpilhada({ nome: 'entrar', modo: 'entrar' })}
           />
         )}
       </View>

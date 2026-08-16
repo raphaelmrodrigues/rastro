@@ -19,11 +19,20 @@ import {
   type SnapshotDiff,
   type SnapshotInsights,
   type Cohort,
+  type ActivityData,
 } from '@rastro/core';
 // Sem extensao nos imports relativos: o Metro (React Native) nao resolve o
 // sufixo .js que o core usa por causa do NodeNext.
-import { loadSnapshot, readIndex, saveSnapshot, eraseEverything } from './storage';
+import {
+  loadSnapshot,
+  readActivity,
+  readIndex,
+  saveActivity,
+  saveSnapshot,
+  eraseEverything,
+} from './storage';
 import { snapshotFromZip } from './importExport';
+import { relatarErro, relatarImport } from './telemetria';
 import { useConta } from './conta';
 import type { FonteArquivo } from './zip';
 
@@ -44,6 +53,13 @@ interface State {
   previous: Snapshot | null;
   reports: Reports | null;
   snapshotCount: number;
+  /**
+   * Resumo do export completo, quando o usuário já mandou um.
+   *
+   * `null` significa "ainda só o export rápido" — e é o que faz a aba Atividade
+   * oferecer o export completo em vez de mostrar telas vazias.
+   */
+  atividade: ActivityData | null;
   error: string | null;
 
   boot: () => Promise<void>;
@@ -74,14 +90,23 @@ export const useStore = create<State>((set, get) => ({
   previous: null,
   reports: null,
   snapshotCount: 0,
+  atividade: null,
   error: null,
 
   async boot() {
     set({ loading: true });
     const index = await readIndex();
+    const atividade = await readActivity();
 
     if (index.length === 0) {
-      set({ loading: false, snapshot: null, previous: null, reports: null, snapshotCount: 0 });
+      set({
+        loading: false,
+        snapshot: null,
+        previous: null,
+        reports: null,
+        snapshotCount: 0,
+        atividade,
+      });
       return;
     }
 
@@ -93,6 +118,7 @@ export const useStore = create<State>((set, get) => ({
       snapshot,
       previous,
       snapshotCount: index.length,
+      atividade,
       reports: snapshot ? buildReports(snapshot, previous) : null,
     });
   },
@@ -100,9 +126,19 @@ export const useStore = create<State>((set, get) => ({
   async importZip(fonte) {
     set({ importing: true, progress: 0, error: null });
     try {
-      const { snapshot, filesFound } = await snapshotFromZip(fonte, newId(), (fracao) =>
+      const { snapshot, filesFound, atividade } = await snapshotFromZip(fonte, newId(), (fracao) =>
         set({ progress: fracao }),
       );
+
+      /*
+       * Relata antes de qualquer recusa abaixo, e de propósito.
+       *
+       * Os dois casos que mais interessam — arquivo sem lista nenhuma e snapshot
+       * vazio — são exatamente os que fazem o import ser rejeitado. Relatar só
+       * no caminho de sucesso deixaria de fora o dia em que o Instagram mudar o
+       * formato, que é o dia inteiro do porquê disto existir.
+       */
+      relatarImport(snapshot, filesFound);
 
       if (filesFound === 0) {
         set({ importing: false });
@@ -127,12 +163,24 @@ export const useStore = create<State>((set, get) => ({
       const anterior = get().snapshot;
       await saveSnapshot(snapshot);
 
+      /*
+       * A atividade só é substituída quando o arquivo novo traz atividade.
+       *
+       * Sem esse cuidado, quem mandou o export completo e depois mandou um
+       * export rápido — o caminho normal, porque o rápido é o que o app pede —
+       * perderia as conversas e os anunciantes sem entender por quê. O resumo
+       * antigo continua válido: ele descreve um retrato de quando foi feito, e a
+       * tela mostra a data.
+       */
+      if (atividade) await saveActivity(atividade);
+
       set({
         importing: false,
         snapshot,
         previous: anterior,
         snapshotCount: get().snapshotCount + 1,
         reports: buildReports(snapshot, anterior),
+        ...(atividade ? { atividade } : {}),
       });
 
       /*
@@ -149,6 +197,9 @@ export const useStore = create<State>((set, get) => ({
 
       return { ok: true };
     } catch (error) {
+      // Exceção no import não é falha de parsing (que vira warning): é bug nosso
+      // ou arquivo em formato que o descompactador não conhece. Vale um relato.
+      relatarErro(error, 'importZip');
       const message = error instanceof Error ? error.message : 'Falha ao ler o arquivo.';
       set({ importing: false, error: message });
       return { ok: false, message };
@@ -157,6 +208,6 @@ export const useStore = create<State>((set, get) => ({
 
   async eraseAll() {
     await eraseEverything();
-    set({ snapshot: null, previous: null, reports: null, snapshotCount: 0 });
+    set({ snapshot: null, previous: null, reports: null, snapshotCount: 0, atividade: null });
   },
 }));

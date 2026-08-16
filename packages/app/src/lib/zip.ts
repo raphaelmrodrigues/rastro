@@ -63,14 +63,24 @@ const ASSINATURAS = [
  *
  * `aoProgredir` recebe a fração lida (0..1) — o export grande leva dezenas de
  * segundos e uma tela parada nesse tempo parece travada.
+ *
+ * `aoExtrair`, quando informado, recebe cada arquivo assim que ele fica pronto e
+ * o arquivo **não** é acumulado no resultado. Isso existe por causa do export
+ * completo: as listas de relacionamento somam 662 KB e cabem na memória sem
+ * pensar, mas as 1.582 conversas somam 59 MB de JSON. Acumular tudo antes de
+ * processar seria pedir 59 MB de strings de uma vez num celular — justamente o
+ * erro que este arquivo inteiro existe para evitar. Com o callback, cada
+ * conversa é reduzida a um resumo de poucas dezenas de bytes e o texto é
+ * descartado na hora.
  */
 export async function extrairDoZip(
   fonte: FonteArquivo,
   interessa: (nome: string) => boolean,
   aoProgredir?: (fracao: number) => void,
+  aoExtrair?: (nome: string, conteudo: string) => void,
 ): Promise<Record<string, string>> {
   try {
-    return await lerZip(fonte, interessa, aoProgredir);
+    return await lerZip(fonte, interessa, aoProgredir, aoExtrair);
   } finally {
     // Vale para erro também: um FileHandle vazado segura o arquivo no cache do
     // aparelho até o processo morrer.
@@ -82,6 +92,7 @@ async function lerZip(
   fonte: FonteArquivo,
   interessa: (nome: string) => boolean,
   aoProgredir?: (fracao: number) => void,
+  aoExtrair?: (nome: string, conteudo: string) => void,
 ): Promise<Record<string, string>> {
   const cabecalho = await fonte.ler(0, Math.min(4, fonte.tamanho));
   if (!pareceZip(cabecalho)) throw new ArquivoNaoEhZip();
@@ -102,7 +113,20 @@ async function lerZip(
           }
           if (pedaco.length > 0) partes.push(pedaco);
           if (ultimo) {
-            saida[arquivo.name] = textoUtf8(partes);
+            const texto = textoUtf8(partes);
+            // Zerar `partes` antes de entregar: num export com milhares de
+            // conversas, segurar os pedaços já concatenados dobra o pico à toa.
+            partes.length = 0;
+            if (aoExtrair) {
+              try {
+                aoExtrair(arquivo.name, texto);
+              } catch {
+                // Um arquivo com formato inesperado não pode abortar o import
+                // inteiro — é a mesma regra do parser (ver CLAUDE.md §7).
+              }
+            } else {
+              saida[arquivo.name] = texto;
+            }
             resolve();
           }
         };

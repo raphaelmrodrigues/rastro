@@ -17,6 +17,7 @@
  * está vendo — mas em uma frase, não em parágrafo.
  */
 
+import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Reports } from '../lib/store';
 import type { Snapshot } from '@rastro/core';
@@ -30,7 +31,17 @@ export type ListaId =
   | 'nao-seguem-de-volta'
   | 'voce-nao-segue'
   | 'mutuos'
-  | 'pendentes';
+  | 'pendentes'
+  /*
+   * As quatro abaixo saem direto de `snapshot.relationships`, e não de um
+   * cálculo sobre seguidores. São listas que o usuário mantém dentro do
+   * Instagram e que o export entrega prontas — o app só as torna visíveis e
+   * pesquisáveis, coisa que o próprio Instagram não faz bem.
+   */
+  | 'deixei-de-seguir'
+  | 'bloqueados'
+  | 'amigos-proximos'
+  | 'restritos';
 
 interface Props {
   snapshot: Snapshot;
@@ -39,6 +50,21 @@ interface Props {
   onOpenList: (lista: ListaId) => void;
   onOpenStats: () => void;
   onImportAgain: () => void;
+  onOpenAtividade: () => void;
+  /**
+   * Convite para criar conta, ou `null` quando não é hora de mostrar.
+   *
+   * Vem pronto de cima em vez de a tela decidir: quem sabe se há conta é o
+   * `useConta`, e o painel não deveria precisar conhecer o estado de sessão para
+   * desenhar seguidores.
+   */
+  convite?: ReactNode;
+  /**
+   * Quantas conversas esperam resposta, ou `null` quando o usuário ainda não
+   * mandou o export completo — que é o caso da maioria, já que o onboarding
+   * pede o arquivo rápido.
+   */
+  conversasPendentes: number | null;
 }
 
 /** Dias após os quais vale a pena reimportar. Abaixo disso, o diff diz pouco. */
@@ -51,6 +77,9 @@ export function DashboardScreen({
   onOpenList,
   onOpenStats,
   onImportAgain,
+  onOpenAtividade,
+  conversasPendentes,
+  convite,
 }: Props) {
   const { insights, diff } = reports;
   const diasDesdeImport = Math.floor((Date.now() - snapshot.importedAt) / 86_400_000);
@@ -89,6 +118,8 @@ export function DashboardScreen({
           body={exportParcial.detail}
         />
       ) : null}
+
+      {convite}
 
       {diff && diff.reliability.level === 'suspect' ? (
         <Banner
@@ -159,6 +190,23 @@ export function DashboardScreen({
           onPress={() => onOpenList('pendentes')}
         />
         <MenuRow label="Evolução e estatísticas" onPress={onOpenStats} />
+        {/*
+         * A entrada da Atividade fica aqui, na tela inicial, e não numa sexta
+         * aba: cinco já é o limite do que cabe numa barra de celular sem os
+         * rótulos se atropelarem — é o número que o próprio Instagram usa.
+         *
+         * O contador some quando ainda não há export completo, e aí a linha vira
+         * o convite. Mostrar "0" convidaria a pessoa a abrir esperando conteúdo.
+         */}
+        <MenuRow
+          label="Conversas e atividade"
+          value={
+            conversasPendentes === null
+              ? 'ver mais'
+              : `${formatNumber(conversasPendentes)} sem resposta`
+          }
+          onPress={onOpenAtividade}
+        />
       </View>
 
       {diasDesdeImport >= DIAS_PARA_REIMPORTAR ? (

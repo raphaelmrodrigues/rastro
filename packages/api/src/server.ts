@@ -22,6 +22,8 @@ import rateLimit from '@fastify/rate-limit';
 import { snapshotRoutes } from './routes/snapshots.js';
 import { authRoutes } from './routes/auth.js';
 import { instagramRoutes } from './routes/instagram.js';
+import { telemetriaRoutes } from './routes/telemetria.js';
+import { adminRoutes } from './routes/admin.js';
 import { startMetricsScheduler } from './lib/scheduler.js';
 import { versaoRecusada } from './lib/versaoDoApp.js';
 
@@ -161,6 +163,13 @@ export async function buildServer() {
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(snapshotRoutes, { prefix: '/profiles/:profileId/snapshots' });
   await app.register(instagramRoutes, { prefix: '/instagram' });
+  await app.register(telemetriaRoutes);
+  /*
+   * O painel só existe se `ADMIN_EMAILS` estiver definido — e, mesmo assim,
+   * responde 404 para quem não está na lista. Registrar sempre e barrar dentro
+   * seria mais simples, mas deixaria a rota anunciando a própria existência.
+   */
+  await app.register(adminRoutes, { prefix: '/admin' });
 
   return app;
 }

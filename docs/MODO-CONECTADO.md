@@ -46,7 +46,7 @@ O custo não recai sobre nós. Recai sobre a conta de quem usa o app: bloqueio d
 ações, checkpoint, e em alguns casos banimento. Um app que quebra a conta do cliente
 para entregar uma tela não é um app melhor.
 
-Então a resposta ao usuário é a verdade, dita na tela `ModesScreen`: para saber
+Então a resposta ao usuário é a verdade, dita na tela `SobreOArquivoScreen`: para saber
 *quem*, precisa do arquivo. Para acompanhar o número no dia a dia, o modo conectado
 resolve.
 
@@ -129,7 +129,15 @@ comentários, que o produto não usa e que só aumentariam a superfície do App 
 | `packages/api/src/lib/instagramApi.ts` | **único** ponto do projeto que fala com o Instagram |
 | `packages/api/src/routes/instagram.ts` | OAuth, coleta, endpoints |
 | `packages/api/src/lib/scheduler.ts` | amostragem diária |
-| `packages/app/src/screens/ModesScreen.tsx` | a comparação honesta, para o usuário |
+| `packages/app/src/screens/SobreOArquivoScreen.tsx` | a explicação honesta, para o usuário |
 
-A tabela da tela vem de `MODE_CAPABILITIES`, no core — a promessa e o comportamento
-mudam no mesmo lugar, de propósito.
+**Estado em 15/08/2026: o modo conectado existe só no servidor.** As rotas, o OAuth,
+a cifragem do token e o amostrador diário estão implementados e testados, mas o app
+não tem nenhuma tela que os acione — não há botão "conectar" em lugar nenhum, e as
+variáveis `INSTAGRAM_APP_*` não estão configuradas em produção, então as rotas
+respondem 503.
+
+A tela `SobreOArquivoScreen` chegou a mostrar uma tabela vinda de
+`MODE_CAPABILITIES` comparando os dois modos. Ela foi removida: comparar com um modo
+que o usuário não tem como ligar é anunciar recurso que não existe. `MODE_CAPABILITIES`
+continua no core, à espera da interface.

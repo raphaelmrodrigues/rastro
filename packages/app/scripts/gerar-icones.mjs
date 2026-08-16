@@ -207,7 +207,8 @@ const CAIXA = { x0: 4 - 2, y0: 7 - 3.5, x1: 28 + 3.5, y1: 26 + 2 };
  * é recortado pelo sistema em círculo, quadrado arredondado ou gota, e só os 66%
  * centrais são garantidos — por isso ele pede um valor menor.
  */
-function desenharMarca(tela, ocupacao) {
+function desenharMarca(tela, ocupacao, corForcada = null) {
+  const c = (padrao) => corForcada ?? padrao;
   const largura = CAIXA.x1 - CAIXA.x0;
   const altura = CAIXA.y1 - CAIXA.y0;
   const escala = (tela.lado * ocupacao) / Math.max(largura, altura);
@@ -218,32 +219,32 @@ function desenharMarca(tela, ocupacao) {
   const py = (v) => topo + v * escala;
   const e = 2 * escala; // espessura de traço, igual à do SVG
 
-  tela.linha(px(4), py(26), px(11), py(21), e, COR.inkFaint);
-  tela.linha(px(11), py(21), px(17), py(23), e, COR.inkFaint);
+  tela.linha(px(4), py(26), px(11), py(21), e, c(COR.inkFaint));
+  tela.linha(px(11), py(21), px(17), py(23), e, c(COR.inkFaint));
   tela.tracejada(
     px(17),
     py(23),
     px(28),
     py(7),
     e,
-    COR.gained,
+    c(COR.gained),
     2.2 * escala,
     2.4 * escala,
     4 * escala,
     5 * escala,
   );
 
-  tela.circulo(px(4), py(26), 2 * escala, COR.inkFaint);
-  tela.circulo(px(11), py(21), 2 * escala, COR.inkFaint);
-  tela.circulo(px(17), py(23), 2.5 * escala, COR.inkMuted);
-  tela.circulo(px(28), py(7), 3.5 * escala, COR.gained);
+  tela.circulo(px(4), py(26), 2 * escala, c(COR.inkFaint));
+  tela.circulo(px(11), py(21), 2 * escala, c(COR.inkFaint));
+  tela.circulo(px(17), py(23), 2.5 * escala, c(COR.inkMuted));
+  tela.circulo(px(28), py(7), 3.5 * escala, c(COR.gained));
 }
 
 // ---------------------------------------------------------------------------
 
-function gerar(nome, lado, { fundo, ocupacao }) {
+function gerar(nome, lado, { fundo, ocupacao, corForcada = null }) {
   const tela = new Tela(lado, fundo);
-  desenharMarca(tela, ocupacao);
+  desenharMarca(tela, ocupacao, corForcada);
   const caminho = join(DESTINO, nome);
   writeFileSync(caminho, png(lado, lado, tela.px));
   return caminho;
@@ -259,6 +260,23 @@ const arquivos = [
   // Splash: só a marca, sobre a cor definida em app.json.
   gerar('splash-icon.png', 1024, { fundo: null, ocupacao: 0.5 }),
   gerar('favicon.png', 64, { fundo: COR.base, ocupacao: 0.66 }),
+  /*
+   * Ícone pequeno da notificação no Android.
+   *
+   * O Android joga fora as cores deste PNG e usa só o canal alfa como recorte,
+   * pintando a silhueta com a cor de destaque do canal. Um ícone colorido vira,
+   * literalmente, um quadrado branco na barra de status — é o defeito mais comum
+   * de app com notificação, e só aparece no aparelho.
+   *
+   * Por isso tudo é desenhado em branco opaco sobre transparente: o que importa
+   * aqui é o formato, não a cor. Ocupação alta porque em 96px não há recorte do
+   * sistema e a marca precisa de todo o espaço para continuar legível.
+   */
+  gerar('notification-icon.png', 96, {
+    fundo: null,
+    ocupacao: 0.82,
+    corForcada: [0xff, 0xff, 0xff],
+  }),
 ];
 
 for (const caminho of arquivos) console.log('gerado', caminho);

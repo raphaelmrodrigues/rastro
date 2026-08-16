@@ -12,7 +12,7 @@
 
 import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
-import type { Snapshot } from '@rastro/core';
+import type { ActivityData, Snapshot } from '@rastro/core';
 
 /**
  * A API de arquivos mudou no SDK 54: `documentDirectory` + funções soltas viraram
@@ -66,6 +66,107 @@ const webStore = {
     }
   },
 };
+
+/*
+ * Ajustes leves — @ do perfil ativo, id do último snapshot enviado, preferência
+ * de lembrete. Coisas pequenas, que não são segredo e não valem um arquivo cada.
+ *
+ * Existe aqui, e não solto em quem precisa, porque `globalThis.localStorage`
+ * **não existe no React Native**. Código que grava direto no localStorage compila,
+ * roda no navegador e vira silenciosamente um no-op no celular: o valor nunca é
+ * gravado, a leitura devolve `null` e nada reclama. Foi exatamente o que estava
+ * acontecendo com o perfil ativo e com o controle de envio pendente.
+ */
+const ARQUIVO_DE_AJUSTES = 'ajustes.json';
+
+/**
+ * Evita reler o arquivo a cada consulta. Precisa ser invalidado em
+ * `eraseEverything`, senão um valor apagado do disco continuaria respondendo.
+ */
+let cacheDeAjustes: Record<string, string> | null = null;
+
+async function lerTodosOsAjustes(): Promise<Record<string, string>> {
+  if (cacheDeAjustes) return cacheDeAjustes;
+  try {
+    const arquivo = new File(ensureRoot(), ARQUIVO_DE_AJUSTES);
+    const raw = arquivo.exists ? await arquivo.text() : null;
+    cacheDeAjustes = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    cacheDeAjustes = {};
+  }
+  return cacheDeAjustes;
+}
+
+/**
+ * Lê um ajuste. A chave é usada como está — inclua o prefixo `rastro:` para que
+ * `webStore.clear()` alcance a chave no navegador.
+ */
+export async function lerAjuste(chave: string): Promise<string | null> {
+  if (isWeb) return globalThis.localStorage?.getItem(chave) ?? null;
+  return (await lerTodosOsAjustes())[chave] ?? null;
+}
+
+/** Grava um ajuste; `null` apaga. */
+export async function salvarAjuste(chave: string, valor: string | null): Promise<void> {
+  if (isWeb) {
+    if (valor === null) globalThis.localStorage?.removeItem(chave);
+    else globalThis.localStorage?.setItem(chave, valor);
+    return;
+  }
+
+  const ajustes = { ...(await lerTodosOsAjustes()) };
+  if (valor === null) delete ajustes[chave];
+  else ajustes[chave] = valor;
+
+  const arquivo = new File(ensureRoot(), ARQUIVO_DE_AJUSTES);
+  if (!arquivo.exists) arquivo.create();
+  arquivo.write(JSON.stringify(ajustes));
+  cacheDeAjustes = ajustes;
+}
+
+/*
+ * Resumo do export completo — conversas, comentários, anunciantes, buscas.
+ *
+ * **Nunca sobe para o servidor, e isso é a regra mais importante deste arquivo.**
+ *
+ * O snapshot de seguidores sobe porque o histórico entre aparelhos depende
+ * disso. Este não: é derivado de conversa privada e do perfil publicitário da
+ * pessoa. Hoje um vazamento do nosso banco expõe uma lista de @s; se este objeto
+ * subisse, passaria a expor com quem cada usuário conversa e quem ele deixou no
+ * vácuo. Nenhuma funcionalidade paga esse risco.
+ *
+ * Fica em arquivo separado do índice de snapshots também por retenção: some com
+ * `eraseEverything`, junto com o resto, sem passo extra que alguém possa
+ * esquecer de chamar.
+ */
+const ARQUIVO_DE_ATIVIDADE = 'atividade.json';
+
+export async function readActivity(): Promise<ActivityData | null> {
+  try {
+    let raw: string | null;
+    if (isWeb) {
+      raw = webStore.read('atividade');
+    } else {
+      const arquivo = new File(ensureRoot(), ARQUIVO_DE_ATIVIDADE);
+      raw = arquivo.exists ? await arquivo.text() : null;
+    }
+    return raw ? (JSON.parse(raw) as ActivityData) : null;
+  } catch {
+    // Igual ao índice: dado corrompido não pode impedir o app de abrir.
+    return null;
+  }
+}
+
+export async function saveActivity(atividade: ActivityData): Promise<void> {
+  const serializado = JSON.stringify(atividade);
+  if (isWeb) {
+    webStore.write('atividade', serializado);
+    return;
+  }
+  const arquivo = new File(ensureRoot(), ARQUIVO_DE_ATIVIDADE);
+  if (!arquivo.exists) arquivo.create();
+  arquivo.write(serializado);
+}
 
 export interface SnapshotIndexEntry {
   id: string;
@@ -173,6 +274,10 @@ export async function saveSnapshot(snapshot: Snapshot): Promise<void> {
  * aparelho sem desinstalar nada.
  */
 export async function eraseEverything(): Promise<void> {
+  // O cache de ajustes vive fora do disco; sem limpar aqui, um valor recém
+  // apagado continuaria sendo respondido pelo resto da sessão.
+  cacheDeAjustes = null;
+
   if (isWeb) {
     webStore.clear();
     return;

@@ -10,6 +10,7 @@
  */
 
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { Snapshot } from '@rastro/core';
 import type { Reports } from '../lib/store';
 import { MenuRow, SectionTitle } from '../components/ui';
 import { colors, space, typography } from '../lib/theme';
@@ -18,11 +19,33 @@ import type { ListaId } from './DashboardScreen';
 
 interface Props {
   reports: Reports;
+  snapshot: Snapshot;
   onOpenList: (lista: ListaId) => void;
+  onOpenAtividade: () => void;
+  /** `null` quando ainda não veio export completo. Ver DashboardScreen. */
+  conversasPendentes: number | null;
 }
 
-export function PessoasScreen({ reports, onOpenList }: Props) {
+export function PessoasScreen({
+  reports,
+  snapshot,
+  onOpenList,
+  onOpenAtividade,
+  conversasPendentes,
+}: Props) {
   const { insights, diff } = reports;
+  const { recentlyUnfollowed, blocked, closeFriends, restricted } = snapshot.relationships;
+
+  /*
+   * A seção só aparece se houver alguma coisa nela.
+   *
+   * Estas quatro listas são vazias para muita gente — ninguém bloqueia, ninguém
+   * usa melhores amigos. Quatro linhas zeradas empurrariam as listas que a
+   * pessoa realmente veio ver para fora da tela, e é justamente a aba onde ela
+   * chega com pressa.
+   */
+  const temListasDoInstagram =
+    recentlyUnfollowed.length + blocked.length + closeFriends.length + restricted.length > 0;
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
@@ -71,6 +94,54 @@ export function PessoasScreen({ reports, onOpenList }: Props) {
         onPress={() => onOpenList('pendentes')}
       />
 
+      {temListasDoInstagram ? (
+        <>
+          <SectionTitle>Suas listas do Instagram</SectionTitle>
+          <Text style={s.notaSecao}>
+            Listas que você mesmo montou dentro do Instagram. Aqui elas ficam num lugar só, com
+            busca — o app do Instagram não mostra nenhuma delas junta.
+          </Text>
+
+          {recentlyUnfollowed.length > 0 ? (
+            <MenuRow
+              label="Você deixou de seguir"
+              value={formatNumber(recentlyUnfollowed.length)}
+              onPress={() => onOpenList('deixei-de-seguir')}
+            />
+          ) : null}
+          {closeFriends.length > 0 ? (
+            <MenuRow
+              label="Melhores amigos"
+              value={formatNumber(closeFriends.length)}
+              onPress={() => onOpenList('amigos-proximos')}
+            />
+          ) : null}
+          {blocked.length > 0 ? (
+            <MenuRow
+              label="Contas bloqueadas"
+              value={formatNumber(blocked.length)}
+              onPress={() => onOpenList('bloqueados')}
+            />
+          ) : null}
+          {restricted.length > 0 ? (
+            <MenuRow
+              label="Contas restritas"
+              value={formatNumber(restricted.length)}
+              onPress={() => onOpenList('restritos')}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      <SectionTitle>Conversas</SectionTitle>
+      <MenuRow
+        label="Conversas e atividade"
+        value={
+          conversasPendentes === null ? 'ver mais' : `${formatNumber(conversasPendentes)} sem resposta`
+        }
+        onPress={onOpenAtividade}
+      />
+
       <Text style={s.nota}>
         Toque em qualquer pessoa para abrir o perfil dela no Instagram.
       </Text>
@@ -88,5 +159,11 @@ const s = StyleSheet.create({
     fontSize: typography.scale.micro,
     marginTop: space.lg,
     lineHeight: 17,
+  },
+  notaSecao: {
+    color: colors.inkMuted,
+    fontSize: typography.scale.caption,
+    lineHeight: 19,
+    marginBottom: space.xs,
   },
 });

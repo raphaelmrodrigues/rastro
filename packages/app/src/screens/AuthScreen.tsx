@@ -1,15 +1,25 @@
 /**
- * Entrada no app. É a primeira tela de quem abre o Rastro sem estar conectado, e
- * a partir de agora não há como passar por ela — nenhuma função do app abre sem
- * conta.
+ * Criar conta ou entrar.
+ *
+ * ## Não é mais porta de entrada (16/08/2026)
+ *
+ * Entre 14 e 16/08/2026 esta tela bloqueava o app inteiro. A reversão tem um
+ * motivo medível: **nenhuma função do app depende de conta**. Parsing, diff,
+ * estatísticas e listas rodam sobre arquivos no próprio aparelho. A conta serve
+ * para guardar histórico, trocar de celular sem perder nada e, no futuro, o
+ * plano pago.
+ *
+ * Cobrar cadastro antes de a pessoa ver qualquer valor era a primeira parede de
+ * um funil que já tem uma espera de até 48h do Instagram no meio. Agora ela é
+ * alcançada por convite, depois do primeiro import, e pelo Perfil.
  *
  * ## O texto
  *
  * O usuário chega vindo de apps que pedem a senha do Instagram. Ele vai olhar
- * este formulário e presumir que é a mesma coisa. Desfazer essa suposição, na
- * primeira tela e sem letra miúda, é o trabalho mais importante do copy do
- * produto inteiro — e é por isso que a promessa aparece como um bloco com ícone,
- * acima dos campos, e não como aviso embaixo do botão.
+ * este formulário e presumir que é a mesma coisa. Desfazer essa suposição, sem
+ * letra miúda, é o trabalho mais importante do copy do produto inteiro — e é por
+ * isso que a promessa aparece como um bloco com ícone, acima dos campos, e não
+ * como aviso embaixo do botão.
  *
  * O que o texto deliberadamente NÃO faz: explicar arquitetura. A versão anterior
  * falava em "histórico entre aparelhos", "modo local", "o que viaja é a lista já
@@ -35,10 +45,25 @@ import { colors, radius, space, typography } from '../lib/theme';
 
 const SENHA_MINIMA = 10;
 
-export function AuthScreen() {
+interface Props {
+  /** Chamado quando a conta fica pronta, para a tela fechar. */
+  aoConcluir?: () => void;
+  /** Abre direto em "Criar conta" — o convite pós-import leva para lá. */
+  modoInicial?: 'entrar' | 'cadastrar';
+  /**
+   * Motivo pelo qual a tela foi aberta, mostrado no topo.
+   *
+   * Quem chega aqui vindo do convite já sabe o que quer; quem chega pelo Perfil
+   * pode não saber. Uma linha de contexto evita a tela parecer uma exigência
+   * súbita depois de o app ter funcionado sem ela.
+   */
+  motivo?: string;
+}
+
+export function AuthScreen({ aoConcluir, modoInicial = 'entrar', motivo }: Props) {
   const { ocupado, erro, cadastrar, entrar, limparErro } = useConta();
 
-  const [modo, setModo] = useState<'entrar' | 'cadastrar'>('entrar');
+  const [modo, setModo] = useState<'entrar' | 'cadastrar'>(modoInicial);
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
 
@@ -49,7 +74,16 @@ export function AuthScreen() {
   const submeter = async () => {
     limparErro();
     const ok = modo === 'entrar' ? await entrar(email, senha) : await cadastrar(email, senha);
-    if (ok) setSenha('');
+    if (!ok) return;
+    setSenha('');
+    /*
+     * Fecha a tela e devolve a pessoa ao que ela estava fazendo.
+     *
+     * O que já foi importado sobe sozinho: `enviarPendente` roda ao entrar e
+     * encontra os snapshots deste aparelho. É o que torna honesta a promessa do
+     * convite — criar conta depois de importar não perde nada.
+     */
+    aoConcluir?.();
   };
 
   const trocarModo = (novo: 'entrar' | 'cadastrar') => {
@@ -74,7 +108,9 @@ export function AuthScreen() {
       <ScrollView contentContainerStyle={s.conteudo} keyboardShouldPersistTaps="handled">
         <View style={s.marca}>
           <Logotipo size="grande" />
-          <Text style={s.assinatura}>Quem entrou e quem saiu da sua lista de seguidores.</Text>
+          <Text style={s.assinatura}>
+            {motivo ?? 'Quem entrou e quem saiu da sua lista de seguidores.'}
+          </Text>
         </View>
 
         <View style={s.promessa}>
@@ -147,10 +183,20 @@ export function AuthScreen() {
           />
         </View>
 
+        {/*
+         * Este texto prometia "aviso quando alguém deixar de te seguir".
+         *
+         * O app não faz isso e não pode fazer: descobrir uma saída no momento em
+         * que acontece exige ler a lista de seguidores continuamente, e a lista
+         * só existe dentro do arquivo que o usuário pede de tempos em tempos. A
+         * promessa aparecia na primeira tela que a pessoa lê, antes de qualquer
+         * outra coisa — e cobrava uma dívida que a única forma de pagar seria
+         * usar a API privada com a sessão dela (regra 2 do CLAUDE.md).
+         */}
         <Text style={s.rodape}>
           {modo === 'entrar'
             ? 'Ainda não tem conta? Toque em "Criar conta" acima.'
-            : 'Ao criar a conta você guarda seu histórico e recebe aviso quando alguém deixar de te seguir.'}
+            : 'Sua conta guarda seu histórico, e é o que permite comparar cada arquivo novo com os anteriores.'}
         </Text>
       </ScrollView>
     </Moldura>

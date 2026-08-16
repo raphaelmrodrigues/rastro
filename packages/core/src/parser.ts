@@ -216,6 +216,25 @@ function htmlToRelationship(
   };
 }
 
+/**
+ * A data desta entrada veio do export, ou é o carimbo do import?
+ *
+ * As duas funções acima caem em `fallbackTimestamp` — que é sempre o
+ * `importedAt` do snapshot — quando o export não traz data. Isso mantém o tipo
+ * `Relationship` simples, mas cria uma armadilha para quem consome: `since`
+ * sempre existe, e um valor falso é indistinguível de um verdadeiro.
+ *
+ * Algumas listas do export nunca trazem data (bloqueados e restritos, em vários
+ * exports). Mostrar "bloqueado em 15/08/2026" quando 15/08 é só o dia em que a
+ * pessoa mexeu no app é inventar um fato — e é o tipo de erro que o usuário
+ * descobre e que derruba a confiança no resto do produto.
+ *
+ * Use isto antes de exibir qualquer data vinda de `Relationship`.
+ */
+export function hasKnownDate(relationship: Relationship, snapshot: Snapshot): boolean {
+  return relationship.since !== snapshot.importedAt;
+}
+
 export interface ParseInput {
   /**
    * Caminho relativo dentro do zip -> conteúdo.

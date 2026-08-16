@@ -8,7 +8,14 @@
 
 import { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
-import type { Account, Relationship, SnapshotDiff, SnapshotInsights } from '@rastro/core';
+import {
+  hasKnownDate,
+  type Account,
+  type Relationship,
+  type Snapshot,
+  type SnapshotDiff,
+  type SnapshotInsights,
+} from '@rastro/core';
 import { Banner, EmptyState, PersonRow } from '../components/ui';
 import { IconeBusca } from '../components/icons';
 import { colors, radius, space, typography } from '../lib/theme';
@@ -28,6 +35,8 @@ interface Props {
   lista: ListaId;
   insights: SnapshotInsights;
   diff: SnapshotDiff | null;
+  /** As listas que o usuário mantém no Instagram vêm daqui, cruas do export. */
+  snapshot: Snapshot;
 }
 
 /**
@@ -39,7 +48,10 @@ interface Props {
  * do que está sendo mostrado — sobretudo em "deixaram de seguir", onde a data é
  * aproximada e omitir isso induziria a conclusão errada.
  */
-export const TITULOS: Record<ListaId, { title: string; explicacao: string }> = {
+export const TITULOS: Record<
+  ListaId,
+  { title: string; explicacao: string; /** Texto do estado vazio, quando "vazio" merece explicação. */ vazio?: string }
+> = {
   'saíram': {
     title: 'Deixaram de seguir',
     explicacao:
@@ -68,14 +80,77 @@ export const TITULOS: Record<ListaId, { title: string; explicacao: string }> = {
       'Pedidos que você enviou e que ninguém aceitou nem recusou. Os mais antigos costumam ' +
       'ser de contas inativas.',
   },
+
+  /*
+   * As quatro abaixo são listas que a pessoa mesma montou dentro do Instagram.
+   * O texto não pode dar a entender que o Rastro descobriu algo: ele só está
+   * mostrando, num lugar onde dá para buscar e contar, o que o app do Instagram
+   * esconde em telas de configuração.
+   *
+   * O `vazio` existe porque em todas elas a lista vazia é o caso comum e é uma
+   * informação boa — mas também pode significar que o arquivo veio sem aquele
+   * pedaço, e o texto genérico ("nada por aqui") não distingue as duas coisas.
+   */
+  'deixei-de-seguir': {
+    title: 'Você deixou de seguir',
+    explicacao:
+      'Contas que você parou de seguir. O Instagram guarda essa lista dos últimos meses, ' +
+      'então ela não cobre a sua conta inteira.',
+    vazio: 'Nada aqui. Ou você não deixou ninguém recentemente, ou seu arquivo veio sem essa parte.',
+  },
+  bloqueados: {
+    title: 'Contas bloqueadas',
+    explicacao: 'Contas que você bloqueou. Elas não conseguem ver seu perfil nem falar com você.',
+    vazio: 'Você não bloqueou ninguém — ou seu arquivo veio sem essa parte.',
+  },
+  'amigos-proximos': {
+    title: 'Melhores amigos',
+    explicacao:
+      'Sua lista de melhores amigos: só estas contas veem os stories que você publica com o ' +
+      'círculo verde.',
+    vazio: 'Sua lista de melhores amigos está vazia — ou seu arquivo veio sem essa parte.',
+  },
+  restritos: {
+    title: 'Contas restritas',
+    explicacao:
+      'Contas que você restringiu. Elas continuam te seguindo, mas os comentários delas só ' +
+      'aparecem para elas mesmas, e você não recebe aviso de mensagem.',
+    vazio: 'Você não restringiu ninguém — ou seu arquivo veio sem essa parte.',
+  },
 };
 
-function toItems(lista: ListaId, insights: SnapshotInsights, diff: SnapshotDiff | null): Item[] {
+function toItems(
+  lista: ListaId,
+  insights: SnapshotInsights,
+  diff: SnapshotDiff | null,
+  snapshot: Snapshot,
+): Item[] {
   const daRelationship = (r: Relationship, prefixo: string): Item => ({
     username: r.username,
     ...(r.displayName ? { displayName: r.displayName } : {}),
     detail: `${prefixo} ${formatDate(r.since)}`,
   });
+
+  /**
+   * Lista crua do export, do mais recente para o mais antigo.
+   *
+   * A data só é exibida quando veio mesmo do arquivo. Quando o export não traz
+   * data, o parser preenche `since` com o instante do import — mostrar isso
+   * daria a alguém a impressão de ter bloqueado uma conta hoje, quando o app não
+   * faz ideia de quando foi. Ver `hasKnownDate` no core.
+   */
+  const doExport = (kind: 'recentlyUnfollowed' | 'blocked' | 'closeFriends' | 'restricted', prefixo: string): Item[] =>
+    snapshot.relationships[kind]
+      .slice()
+      .sort((a, b) => b.since - a.since)
+      .map((r) =>
+        hasKnownDate(r, snapshot)
+          ? daRelationship(r, prefixo)
+          : {
+              username: r.username,
+              ...(r.displayName ? { displayName: r.displayName } : {}),
+            },
+      );
 
   switch (lista) {
     case 'saíram':
@@ -121,17 +196,32 @@ function toItems(lista: ListaId, insights: SnapshotInsights, diff: SnapshotDiff 
           ...daRelationship(r, 'enviado em'),
           badge: formatRelative(r.since),
         }));
+
+    case 'deixei-de-seguir':
+      return doExport('recentlyUnfollowed', 'você deixou de seguir em');
+
+    case 'bloqueados':
+      return doExport('blocked', 'bloqueado em');
+
+    case 'amigos-proximos':
+      return doExport('closeFriends', 'adicionado em');
+
+    case 'restritos':
+      return doExport('restricted', 'restringido em');
   }
 }
 
-export function PeopleListScreen({ lista, insights, diff }: Props) {
+export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
   const [busca, setBusca] = useState('');
   // Só aparece se o aparelho recusar tanto o app quanto o navegador. Raro, mas
   // silenciar seria pior: o usuário ficaria tocando numa linha que não responde.
   const [falhouAoAbrir, setFalhouAoAbrir] = useState(false);
-  const { explicacao } = TITULOS[lista];
+  const { explicacao, vazio } = TITULOS[lista];
 
-  const items = useMemo(() => toItems(lista, insights, diff), [lista, insights, diff]);
+  const items = useMemo(
+    () => toItems(lista, insights, diff, snapshot),
+    [lista, insights, diff, snapshot],
+  );
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     if (!termo) return items;
@@ -215,7 +305,8 @@ export function PeopleListScreen({ lista, insights, diff }: Props) {
             body={
               busca
                 ? 'Nenhuma conta com esse termo.'
-                : 'Esta lista está vazia — o que, dependendo da lista, é uma boa notícia.'
+                : (vazio ??
+                  'Esta lista está vazia — o que, dependendo da lista, é uma boa notícia.')
             }
           />
         }

@@ -320,6 +320,18 @@ export function temSessao(): boolean {
 }
 
 /**
+ * Token de acesso atual, ou `null` quando não há sessão.
+ *
+ * Existe para a telemetria, que precisa funcionar **também** sem sessão: um erro
+ * fatal antes do login é justamente o que mais importa saber. Por isso ela não
+ * usa `autenticado()`, que exige token e renova sessão — um relato de falha não
+ * pode disparar refresh nem falhar por falta de login.
+ */
+export function tokenAtual(): string | null {
+  return sessao?.accessToken ?? null;
+}
+
+/**
  * Apaga a conta e tudo que está ligado a ela no servidor. Não tem volta.
  *
  * Oferecer isto dentro do app não é gentileza: Apple e Google exigem exclusão de

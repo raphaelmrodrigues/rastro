@@ -30,7 +30,13 @@
     },
     "plugins": [
       "expo-document-picker",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#e8a33d"
+        }
+      ],
       "expo-secure-store"
     ]
   }

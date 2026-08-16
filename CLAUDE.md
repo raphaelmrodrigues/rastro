@@ -131,16 +131,33 @@ npm run dev:app          # sobe o Expo
 O `core` está completo e validado contra um export real (76 testes). A `api` está
 implementada e rodando em produção. O que falta está em `docs/ROADMAP.md`.
 
-**Conta obrigatória (decisão do dono, 14/08/2026).** Até essa data o app funcionava
-inteiro sem conta e a sincronização era opt-in. Hoje nenhuma tela abre sem sessão: quem
-não entra vê apenas `screens/AuthScreen.tsx`. O processamento continua acontecendo no
-aparelho — o `.zip` nunca sai dele, e o que sobe é a lista já processada —, mas isso
-deixou de ser uma escolha do usuário e por isso **não deve mais ser explicado na
-interface**. Explicar uma decisão que a pessoa não toma é ruído.
+**Conta opcional (decisão do dono, 16/08/2026).** Entre 14 e 16/08/2026 a conta foi
+obrigatória e nenhuma tela abria sem sessão. Foi revertido porque **nenhuma função do app
+depende de conta**: parsing, diff, estatísticas, listas e atividade rodam sobre arquivos no
+próprio aparelho. Exigir cadastro antes de a pessoa ver qualquer resultado punha uma parede
+no começo de um funil que já tem uma espera de até 48h do Instagram no meio.
 
-O que **não** mudou, e não pode mudar: a senha pedida na entrada é a do Rastro. A regra 1
-continua inteira, e a tela de entrada afirma isso acima dos campos, porque o usuário chega
-de apps que pedem a senha do Instagram e vai supor que aqui é igual.
+A conta serve para: guardar o histórico fora do celular, trocar de aparelho sem perder
+nada, e o plano pago quando existir. Ela é oferecida em dois lugares, nunca antes de o app
+ter entregue alguma coisa:
+
+- `components/ConviteDeConta.tsx`, no painel, **depois do primeiro import** — quando a
+  pessoa acabou de ver a própria rede e passa a ter algo concreto a perder. Dispensável, e
+  volta no import seguinte.
+- `screens/PerfilScreen.tsx`, sempre.
+
+Ao criar conta depois de já ter importado, `enviarPendente` sobe os snapshots locais — é o
+que torna honesta a promessa do convite. Não quebre isso.
+
+O que **não** mudou, e não pode mudar: a senha pedida é a do Rastro. A regra 1 continua
+inteira, e a tela de entrada afirma isso acima dos campos, porque o usuário chega de apps
+que pedem a senha do Instagram e vai supor que aqui é igual.
+
+**Telemetria (16/08/2026).** `packages/app/src/lib/telemetria.ts` manda relatos de falha de
+parsing e de erro fatal para `POST /reports`. Só código, arquivo e contagem — **nunca** o
+`detail` de um `ParseWarning`, que é texto livre e carrega o @ do usuário dentro da frase.
+O schema no servidor é `.strict()` e há testes travando isso. O painel do dono fica em
+`/admin`, protegido por `ADMIN_EMAILS`, e não mostra dado de snapshot de ninguém.
 
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.

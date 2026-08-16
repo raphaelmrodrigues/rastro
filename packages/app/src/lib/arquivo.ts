@@ -24,7 +24,7 @@
 
 import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import type { FonteArquivo } from './zip';
 
 /** Devolve null quando o usuário desiste da escolha. */
@@ -65,6 +65,15 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
   const resultado = await DocumentPicker.getDocumentAsync({
     // O Instagram entrega .zip; alguns aparelhos reportam o mime genérico.
     type: ['application/zip', 'application/octet-stream', '*/*'],
+    /*
+     * A cópia é necessária, e não é escolha nossa: no Android o seletor devolve
+     * um `content://` que a API de arquivos não consegue abrir por intervalo, e
+     * ler por intervalo é o que evita carregar o zip inteiro na memória. Sem a
+     * cópia, o import de um export grande não funciona.
+     *
+     * O preço é um segundo arquivo do mesmo tamanho no cache do app — 479 MB no
+     * export real de teste. Por isso `fechar()` apaga a cópia. Ver abaixo.
+     */
     copyToCacheDirectory: true,
   });
 
@@ -87,6 +96,34 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
     },
     fechar() {
       handle.close();
+      descartarCopiaDoCache(arquivo);
     },
   };
+}
+
+/**
+ * Apaga a cópia que o seletor fez no cache do app.
+ *
+ * Sem isto, cada import deixa um zip inteiro parado no aparelho: no export de
+ * teste, 479 MB por importação, somados aos 479 MB que o usuário já tem na pasta
+ * de downloads. O sistema até limpa cache sozinho, mas só sob pressão de espaço
+ * e sem hora marcada — na prática a pessoa perde quase 1 GB e não sabe por quê.
+ *
+ * `fechar()` roda no `finally` do import (ver zip.ts), então isto vale também
+ * quando a leitura falha no meio — que é justamente quando um arquivo grande
+ * ficaria esquecido.
+ */
+function descartarCopiaDoCache(arquivo: File): void {
+  try {
+    /*
+     * Só apaga dentro do cache. Em alguns aparelhos o seletor devolve o caminho
+     * real do arquivo escolhido em vez de uma cópia, e aí apagar destruiria o
+     * download do próprio usuário — que ele levou até 48h para conseguir.
+     */
+    if (!arquivo.uri.startsWith(Paths.cache.uri)) return;
+    if (arquivo.exists) arquivo.delete();
+  } catch {
+    // Falhar aqui não pode derrubar um import que deu certo. O pior caso é o
+    // arquivo sobrar, que é exatamente o comportamento anterior.
+  }
 }

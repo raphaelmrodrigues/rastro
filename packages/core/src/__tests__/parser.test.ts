@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseExport } from '../parser.js';
+import { hasKnownDate, parseExport } from '../parser.js';
 import { repairMojibake } from '../text.js';
 
 const IMPORTADO_EM = Date.UTC(2026, 7, 13);
@@ -208,5 +208,47 @@ describe('repairMojibake', () => {
     // "Ã" solto, sem byte de continuação válido depois: não é mojibake.
     expect(repairMojibake('Ã')).toBe('Ã');
     expect(repairMojibake('100% Ã 20°')).toBe('100% Ã 20°');
+  });
+});
+
+/**
+ * `since` sempre existe, mesmo quando o export não trouxe data — nesse caso ele
+ * vale o `importedAt`. Sem estes testes, a UI não teria como distinguir uma data
+ * real de um carimbo do import, e mostraria "bloqueado em <dia do import>" com
+ * toda a cara de fato verificado.
+ */
+describe('hasKnownDate', () => {
+  it('reconhece data que veio do export', () => {
+    const snap = base({
+      'blocked_profiles.json': {
+        relationships_blocked_users: [
+          {
+            title: 'fulano',
+            // epoch em SEGUNDOS, como o Instagram entrega
+            timestamp: Math.floor(Date.UTC(2025, 2, 10) / 1000),
+            string_list_data: [{ value: 'fulano', timestamp: Math.floor(Date.UTC(2025, 2, 10) / 1000) }],
+          },
+        ],
+      },
+    });
+
+    const [entrada] = snap.relationships.blocked;
+    expect(entrada.since).toBe(Date.UTC(2025, 2, 10));
+    expect(hasKnownDate(entrada, snap)).toBe(true);
+  });
+
+  it('reconhece o carimbo do import como data desconhecida', () => {
+    const snap = base({
+      'restricted_profiles.json': {
+        relationships_restricted_users: [
+          { title: 'beltrano', string_list_data: [{ value: 'beltrano' }] },
+        ],
+      },
+    });
+
+    const [entrada] = snap.relationships.restricted;
+    expect(entrada.since).toBe(IMPORTADO_EM);
+    expect(hasKnownDate(entrada, snap)).toBe(false);
+    expect(snap.warnings.some((w) => w.code === 'MISSING_TIMESTAMP')).toBe(true);
   });
 });

@@ -1,10 +1,11 @@
 /**
- * Conta do Rastro e sincronização — ambas opcionais.
+ * Conta do Rastro e sincronização.
  *
- * O app funciona inteiro sem isto. Quem não cria conta continua com tudo no
- * aparelho e não manda nada para lugar nenhum; é o modo privado, e ele é o
- * padrão de propósito. A conta existe para quem quer o mesmo histórico em mais
- * de um aparelho e as notificações.
+ * A conta é obrigatória desde 14/08/2026 (decisão do dono, registrada no §9 do
+ * CLAUDE.md): nenhuma tela abre sem sessão. O processamento continua acontecendo
+ * no aparelho — o `.zip` nunca sai dele, e o que sobe é a lista já processada —,
+ * mas isso deixou de ser escolha do usuário e por isso não é mais explicado na
+ * interface.
  *
  * A decisão que atravessa este arquivo: **o import local nunca depende da rede**.
  * O snapshot é gravado no aparelho primeiro e o envio vem depois. Se o servidor
@@ -15,7 +16,8 @@
 
 import { create } from 'zustand';
 import type { Snapshot } from '@rastro/core';
-import { loadSnapshot as loadSnapshotLocal, readIndex } from './storage';
+import { lerAjuste, loadSnapshot as loadSnapshotLocal, readIndex, salvarAjuste } from './storage';
+import { esquecerLembretes } from './notificacoes';
 import {
   cadastrar as apiCadastrar,
   criarPerfil,
@@ -48,14 +50,27 @@ const CHAVE_PERFIL = 'rastro:profileId';
  */
 const CHAVE_ULTIMO_ENVIADO = 'rastro:ultimoSnapshotEnviado';
 
-function lerPerfilSalvo(): string | null {
-  return globalThis.localStorage?.getItem(CHAVE_PERFIL) ?? null;
+/*
+ * Estas duas chaves passavam por `globalThis.localStorage`, que **não existe no
+ * React Native**. No navegador funcionava; no celular a gravação era um no-op
+ * silencioso e a leitura devolvia sempre `null`, com dois efeitos:
+ *
+ *  - o perfil ativo não sobrevivia a fechar o app (caía sempre no primeiro da
+ *    conta, o que só passa despercebido enquanto houver um perfil só);
+ *  - o controle de "já enviei este snapshot" nunca persistia, então toda abertura
+ *    do app reenviava a lista inteira de seguidores. O servidor deduplica, mas o
+ *    upload acontecia — no plano de dados do usuário.
+ *
+ * Agora vão pelo `storage`, que grava em arquivo no aparelho e em localStorage no
+ * navegador. As funções ficaram assíncronas por causa disso; todos os pontos de
+ * chamada já estavam dentro de funções `async`.
+ */
+function lerPerfilSalvo(): Promise<string | null> {
+  return lerAjuste(CHAVE_PERFIL);
 }
 
-function salvarPerfil(id: string | null): void {
-  if (!globalThis.localStorage) return;
-  if (id) globalThis.localStorage.setItem(CHAVE_PERFIL, id);
-  else globalThis.localStorage.removeItem(CHAVE_PERFIL);
+function salvarPerfil(id: string | null): Promise<void> {
+  return salvarAjuste(CHAVE_PERFIL, id);
 }
 
 export type EstadoDeEnvio =
@@ -160,8 +175,10 @@ export const useConta = create<ContaState>((set, get) => ({
   async sair() {
     set({ ocupado: true });
     await apiSair();
-    salvarPerfil(null);
-    globalThis.localStorage?.removeItem(CHAVE_ULTIMO_ENVIADO);
+    await salvarPerfil(null);
+    await salvarAjuste(CHAVE_ULTIMO_ENVIADO, null);
+    // Um lembrete agendado continuaria tocando para quem já saiu do app.
+    await esquecerLembretes();
     set({
       ocupado: false,
       conectado: false,
@@ -189,9 +206,12 @@ export const useConta = create<ContaState>((set, get) => ({
      * propósito: mesmo que a chamada tenha falhado, se chegamos aqui é porque
      * ela não lançou.
      */
+    // O lembrete sai antes do `eraseEverything`: ele precisa ler a preferência
+    // para cancelar o agendamento, e o erase apaga essa preferência junto.
+    await esquecerLembretes();
     await eraseEverything();
-    salvarPerfil(null);
-    globalThis.localStorage?.removeItem(CHAVE_ULTIMO_ENVIADO);
+    await salvarPerfil(null);
+    await salvarAjuste(CHAVE_ULTIMO_ENVIADO, null);
 
     set({
       ocupado: false,
@@ -207,7 +227,7 @@ export const useConta = create<ContaState>((set, get) => ({
     set({ ocupado: true, erro: null });
     try {
       const perfil = await criarPerfil(handle.trim().replace(/^@/, ''));
-      salvarPerfil(perfil.id);
+      await salvarPerfil(perfil.id);
       set({ ocupado: false, perfil });
       // Quem já usava o app no modo local acabou de ganhar um destino para os
       // imports que ele fez antes de criar conta.
@@ -234,7 +254,7 @@ export const useConta = create<ContaState>((set, get) => ({
         relationships: snapshot.relationships,
         warnings: snapshot.warnings,
       });
-      globalThis.localStorage?.setItem(CHAVE_ULTIMO_ENVIADO, snapshot.id);
+      await salvarAjuste(CHAVE_ULTIMO_ENVIADO, snapshot.id);
       set({
         envio: { situacao: 'enviado', duplicado: resultado.duplicate, em: Date.now() },
       });
@@ -256,7 +276,7 @@ export const useConta = create<ContaState>((set, get) => ({
     if (indice.length === 0) return;
 
     const maisRecente = indice[0];
-    if (globalThis.localStorage?.getItem(CHAVE_ULTIMO_ENVIADO) === maisRecente.id) return;
+    if ((await lerAjuste(CHAVE_ULTIMO_ENVIADO)) === maisRecente.id) return;
 
     const snapshot = await loadSnapshotLocal(maisRecente.id);
     if (snapshot) await get().sincronizar(snapshot);
@@ -281,9 +301,9 @@ async function carregarPerfil(set: (parcial: Partial<ContaState>) => void): Prom
       set({ perfil: null });
       return;
     }
-    const salvo = lerPerfilSalvo();
+    const salvo = await lerPerfilSalvo();
     const escolhido = perfis.find((p) => p.id === salvo) ?? perfis[0];
-    salvarPerfil(escolhido.id);
+    await salvarPerfil(escolhido.id);
     set({ perfil: escolhido });
   } catch {
     // Falhar aqui não desconecta: o token pode estar bom e a rede, ruim.

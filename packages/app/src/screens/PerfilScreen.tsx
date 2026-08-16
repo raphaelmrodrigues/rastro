@@ -1,13 +1,17 @@
 /**
  * Aba Perfil — conta, sincronização e sair.
  *
- * Antes esta tela precisava convencer o usuário a criar conta, e por isso
- * explicava a arquitetura do produto: o que ficava no aparelho, o que subia para
- * o servidor, o que era opcional. Com a conta obrigatória, nada disso é decisão
- * dele — e explicar uma decisão que a pessoa não toma é só ruído.
+ * Tem três estados, e a ordem entre eles importa:
  *
- * O que sobrou é o que ele de fato usa: qual @ está sendo acompanhado, se a
- * última atualização chegou ao servidor, e como sair.
+ * 1. **sem conta** — o padrão de quem acabou de instalar. A tela oferece a conta
+ *    e explica o que ela resolve, sem tratar a ausência dela como pendência.
+ * 2. **com conta, sem perfil** — passo seguinte ao cadastro, onde se define o @.
+ * 3. **completo** — qual @ está sendo acompanhado, se a última atualização
+ *    chegou ao servidor, lembretes, e como sair.
+ *
+ * O texto do estado 1 não explica arquitetura ("o zip não sai do aparelho", "o
+ * que viaja é a lista processada"). Diz o que a pessoa ganha e o que ela arrisca
+ * perder, que é a única parte que muda a decisão dela.
  *
  * Nenhum campo aqui pede senha do Instagram, e nunca vai pedir. É a regra 1 do
  * CLAUDE.md, e é o que separa este app dos que queimam a conta de quem usa.
@@ -16,6 +20,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Avatar, Banner, Button, MenuRow, SectionTitle } from '../components/ui';
+import { Lembretes } from '../components/Lembretes';
 import { IconeEscudo } from '../components/icons';
 import { useConta } from '../lib/conta';
 import { API_URL, VERSAO_DO_APP } from '../api/client';
@@ -24,17 +29,77 @@ import { colors, radius, space, typography } from '../lib/theme';
 interface Props {
   /** Quantos arquivos já foram enviados neste aparelho. */
   snapshotCount: number;
+  /** Quando foi o último import, para o lembrete contar a partir dali. */
+  ultimaAtualizacao: number | null;
   onImportar: () => void;
   onAbrirSobreArquivo: () => void;
+  onCriarConta: () => void;
+  onEntrar: () => void;
 }
 
-export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }: Props) {
-  const { perfil, ocupado, erro, envio, sair, definirPerfil, enviarPendente, excluirConta } =
-    useConta();
+export function PerfilScreen({
+  snapshotCount,
+  ultimaAtualizacao,
+  onImportar,
+  onAbrirSobreArquivo,
+  onCriarConta,
+  onEntrar,
+}: Props) {
+  const {
+    conectado,
+    perfil,
+    ocupado,
+    erro,
+    envio,
+    sair,
+    definirPerfil,
+    enviarPendente,
+    excluirConta,
+  } = useConta();
   const [handle, setHandle] = useState('');
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
 
-  // Sem perfil ainda: é o passo seguinte ao cadastro, e a tela não deve
+  /*
+   * Sem conta: o Perfil vira o lugar onde ela é oferecida.
+   *
+   * Vem antes do pedido do @ porque o @ só existe depois da conta — ele é criado
+   * no servidor. Quem usa o app sem conta não tem perfil nenhum, e isso é um
+   * estado válido, não um cadastro pela metade.
+   */
+  if (!conectado) {
+    return (
+      <ScrollView style={s.screen} contentContainerStyle={s.conteudo}>
+        <Text style={s.titulo}>Você está usando sem conta</Text>
+        <Text style={s.explicacao}>
+          Tudo funciona assim: seus arquivos são lidos e guardados neste celular. Uma conta serve
+          para o histórico não morrer junto com o aparelho.
+        </Text>
+
+        <View style={s.promessa}>
+          <IconeEscudo size={20} />
+          <Text style={s.promessaTexto}>
+            A senha do Rastro é só do Rastro. Nunca pedimos a senha do seu Instagram.
+          </Text>
+        </View>
+
+        <SectionTitle>Conta</SectionTitle>
+        <Button label="Criar conta" onPress={onCriarConta} />
+        <Button label="Já tenho conta" variant="ghost" onPress={onEntrar} />
+
+        <SectionTitle>Seus dados</SectionTitle>
+        <MenuRow label="Enviar um arquivo novo" onPress={onImportar} />
+        <MenuRow label="Como conseguir o arquivo" onPress={onAbrirSobreArquivo} />
+
+        <Lembretes ultimaAtualizacao={ultimaAtualizacao} />
+
+        <Text style={s.rodape}>
+          Rastro {VERSAO_DO_APP} · {API_URL.replace(/^https?:\/\//, '')}
+        </Text>
+      </ScrollView>
+    );
+  }
+
+  // Com conta e sem perfil: passo seguinte ao cadastro, e a tela não deve
   // oferecer mais nada até ele terminar.
   if (!perfil) {
     return (
@@ -109,6 +174,8 @@ export function PerfilScreen({ snapshotCount, onImportar, onAbrirSobreArquivo }:
           Instagram entrega a você.
         </Text>
       </View>
+
+      <Lembretes ultimaAtualizacao={ultimaAtualizacao} />
 
       <SectionTitle>Conta</SectionTitle>
       <Button
