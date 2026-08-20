@@ -21,8 +21,17 @@ import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Reports } from '../lib/store';
 import type { Snapshot } from '@rastro/core';
-import { Avatar, Banner, Button, MenuRow, SectionTitle, StatCard, StatRow } from '../components/ui';
-import { colors, space, typography } from '../lib/theme';
+import {
+  Avatar,
+  Banner,
+  Button,
+  Gradiente,
+  MenuRow,
+  SectionTitle,
+  StatCard,
+  StatRow,
+} from '../components/ui';
+import { colors, gradients, heading, radius, space, typography } from '../lib/theme';
 import { formatDate, formatNumber, formatRelative, formatSigned } from '../lib/format';
 
 export type ListaId =
@@ -87,28 +96,44 @@ export function DashboardScreen({
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
-      {/* Cabeçalho de perfil: avatar, @ e data — igual ao topo de um perfil. */}
-      <View style={s.perfil}>
-        <Avatar username={handle ?? 'rastro'} size={64} />
-        <View style={s.perfilTexto}>
-          <Text style={s.handle}>{handle ? `@${handle}` : 'Sua conta'}</Text>
-          <Text style={s.desde}>
-            Atualizado {formatRelative(snapshot.importedAt)} · {formatDate(snapshot.importedAt)}
-          </Text>
+      {/*
+       * Cabeçalho de perfil: avatar, @, data e os três números, todos dentro de
+       * um cartão de gradiente suave.
+       *
+       * Antes era tudo solto sobre o fundo, e o resultado numa tela clara era
+       * uma sequência de textos sem hierarquia — o app abria parecendo um
+       * documento. O cartão dá ao retrato da rede um lugar próprio, e é a mancha
+       * de cor que quebra o branco logo no alto, onde o olho chega primeiro.
+       *
+       * O gradiente é o `suave`, quase branco: aqui ele emoldura conteúdo que
+       * precisa ser lido, e um fundo saturado obrigaria a inverter o texto todo.
+       */}
+      <Gradiente cores={gradients.suave} style={s.hero}>
+        <View style={s.perfil}>
+          {/* Com anel: é o avatar do dono da conta, o único que se destaca por
+              direito nesta tela. */}
+          <Avatar username={handle ?? 'rastro'} size={64} anel />
+          <View style={s.perfilTexto}>
+            <Text style={s.handle}>{handle ? `@${handle}` : 'Sua conta'}</Text>
+            <Text style={s.desde}>
+              Atualizado {formatRelative(snapshot.importedAt)} · {formatDate(snapshot.importedAt)}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <StatRow
-        itens={[
-          { label: 'Seguidores', value: formatNumber(insights.followerCount) },
-          { label: 'Seguindo', value: formatNumber(insights.followingCount) },
-          {
-            label: 'Mútuos',
-            value: formatNumber(insights.mutuals.length),
-            onPress: () => onOpenList('mutuos'),
-          },
-        ]}
-      />
+        <StatRow
+          semLinha
+          itens={[
+            { label: 'Seguidores', value: formatNumber(insights.followerCount) },
+            { label: 'Seguindo', value: formatNumber(insights.followingCount) },
+            {
+              label: 'Mútuos',
+              value: formatNumber(insights.mutuals.length),
+              onPress: () => onOpenList('mutuos'),
+            },
+          ]}
+        />
+      </Gradiente>
 
       {/* Qualidade do dado antes do dado. */}
       {exportParcial ? (
@@ -235,12 +260,21 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.base },
   content: { padding: space.lg, paddingBottom: space.xl },
 
-  perfil: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.md },
+  hero: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: space.md,
+    paddingTop: space.md,
+    paddingBottom: space.xs,
+    marginBottom: space.md,
+    overflow: 'hidden',
+  },
+  perfil: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.sm },
   perfilTexto: { flex: 1, gap: 2 },
   handle: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
   },
   desde: { color: colors.inkMuted, fontSize: typography.scale.caption },
 

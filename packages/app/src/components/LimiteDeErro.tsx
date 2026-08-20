@@ -22,7 +22,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from './ui';
 import { Logotipo } from './Marca';
 import { relatarErro } from '../lib/telemetria';
-import { colors, space, typography } from '../lib/theme';
+import { colors, heading, space, typography } from '../lib/theme';
 
 interface Props {
   children: ReactNode;
@@ -97,8 +97,7 @@ const s = StyleSheet.create({
   conteudo: { padding: space.lg, gap: space.md, alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
     textAlign: 'center',
   },
   texto: {

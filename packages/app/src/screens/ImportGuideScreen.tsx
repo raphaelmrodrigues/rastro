@@ -1,11 +1,29 @@
 /**
  * Aba Importar — como conseguir o arquivo e enviá-lo.
  *
- * Esta é a tela mais importante do produto inteiro. A fricção de pedir o arquivo
- * no Instagram e esperar até 48h é o principal motivo de abandono. Cada palavra
- * aqui existe para reduzir dúvida.
+ * Esta é a tela mais importante do produto inteiro. Sair do app, achar um menu
+ * escondido dentro do Instagram e voltar é o principal motivo de abandono. Cada
+ * palavra aqui existe para reduzir dúvida.
  *
- * Duas instruções carregam destaque visual porque são as que, se erradas,
+ * Sobre a espera: pedindo só "Seguidores e seguindo", o arquivo chega em poucos
+ * minutos — foi o observado num teste real, em 19/08/2026. As 48 horas são o
+ * teto que o Instagram publica, e valem na prática para quem pede o export
+ * inteiro. Anunciar "até 48 horas" como se fosse a regra assusta na hora errada
+ * e faz desistir gente que teria o arquivo antes de largar o celular. A ressalva
+ * fica no fim do passo, entre parênteses, porque quem cai no caso raro precisa
+ * saber que aquilo é normal.
+ *
+ * ## O que mudou em 19/08/2026
+ *
+ * A tela era uma página só, com sete passos numerados abertos, um bloco sobre
+ * senha e dois links soltos — e ela era a **primeira** coisa que uma pessoa via
+ * ao abrir o app. Muito texto num momento em que ninguém tem motivo para ler.
+ *
+ * A apresentação do produto saiu daqui e virou `BemVindoScreen`. O que ficou é
+ * o que esta tela realmente é: um procedimento. E procedimento se lê recolhido,
+ * um passo de cada vez, não como parede.
+ *
+ * Duas instruções continuam com destaque visual porque são as que, se erradas,
  * estragam o resultado sem o usuário perceber:
  *
  * 1. "Marque só Seguidores e seguindo" — sem isso o arquivo vem com fotos e
@@ -16,15 +34,19 @@
  *    Comparar um desses com um completo faz o app acusar centenas de saídas que
  *    nunca aconteceram.
  *
- * O texto foi reescrito para falar do que o usuário vê e faz. A versão anterior
- * explicava por que a data de saída é aproximada e o que acontece com o arquivo
- * dentro do app — informação verdadeira, mas que ninguém lê antes de ter o
- * resultado na mão. Ela vive agora no rodapé do painel, junto do resultado.
+ * ## As duas pessoas que chegam aqui
+ *
+ * Quem ainda não pediu o arquivo precisa do procedimento. Quem já pediu e
+ * esperou precisa de um botão, e nada mais — obrigá-la a rolar sete
+ * passos toda vez é castigo. Por isso o botão de enviar fica fixo no rodapé e o
+ * procedimento vem recolhido a partir da segunda visita.
  */
 
-import { ScrollView, Text, View, StyleSheet, Pressable, Linking } from 'react-native';
-import { IconeEscudo } from '../components/icons';
-import { colors, space, typography, radius } from '../lib/theme';
+import { useState } from 'react';
+import { ScrollView, Text, View, StyleSheet, Pressable, Linking, ActivityIndicator } from 'react-native';
+import { IconeEscudo, IconeExterno, IconeAvancar } from '../components/icons';
+import { Gradiente } from '../components/ui';
+import { colors, gradients, heading, radius, space, typography } from '../lib/theme';
 
 const PASSOS = [
   {
@@ -51,7 +73,7 @@ const PASSOS = [
   },
   {
     title: 'Espere o e-mail do Instagram',
-    body: 'Costuma levar alguns minutos, mas pode chegar a 48 horas. Você não precisa deixar o app aberto.',
+    body: 'Pedindo só a lista de seguidores, ele costuma chegar em poucos minutos. Você não precisa deixar o app aberto — o Instagram avisa por e-mail. (Em contas muito antigas pode demorar mais; o prazo máximo que o Instagram publica é de 48 horas.)',
   },
   {
     title: 'Volte aqui e envie o arquivo',
@@ -59,10 +81,13 @@ const PASSOS = [
   },
 ];
 
+/** Em que ponto do envio a tela está. Cada fase tem um texto próprio no botão. */
+export type FaseDoImport = 'parado' | 'escolhendo' | 'lendo';
+
 interface Props {
   onPickFile: () => void;
   onAbrirSobreArquivo: () => void;
-  importing?: boolean;
+  fase: FaseDoImport;
   /** Fração já lida do arquivo (0..1). O arquivo completo passa de 400 MB. */
   progress?: number;
   /** Mensagem de falha do último envio, se houve. */
@@ -74,18 +99,34 @@ interface Props {
 export function ImportGuideScreen({
   onPickFile,
   onAbrirSobreArquivo,
-  importing,
+  fase,
   progress,
   error,
   primeiraVez,
 }: Props) {
-  // Sem porcentagem enquanto não há o que mostrar: um "0%" parado é pior que
-  // nenhum número, porque parece travado.
-  const rotulo = importing
-    ? progress && progress > 0.01
-      ? `Lendo… ${Math.round(progress * 100)}%`
-      : 'Lendo o arquivo…'
-    : 'Escolher arquivo';
+  // Na primeira visita o procedimento é o conteúdo da tela. Depois, quem volta
+  // aqui volta com o arquivo na mão — e o passo a passo só atrapalha o botão.
+  const [passosAbertos, setPassosAbertos] = useState(primeiraVez);
+
+  const ocupado = fase !== 'parado';
+
+  /*
+   * Sem porcentagem enquanto não há o que mostrar: um "0%" parado é pior que
+   * nenhum número, porque parece travado.
+   *
+   * A fase "escolhendo" existe porque o seletor do Android leva segundos para
+   * abrir num aparelho ocupado. Sem um rótulo aqui, o toque não produzia nada
+   * visível e a pessoa concluía que o botão estava quebrado — que foi
+   * exatamente o que aconteceu no primeiro teste em aparelho.
+   */
+  const rotulo =
+    fase === 'escolhendo'
+      ? 'Abrindo seus arquivos…'
+      : fase === 'lendo'
+        ? progress && progress > 0.01
+          ? `Lendo… ${Math.round(progress * 100)}%`
+          : 'Lendo o arquivo…'
+        : 'Escolher arquivo';
 
   return (
     <View style={s.raiz}>
@@ -99,6 +140,66 @@ export function ImportGuideScreen({
             : 'Peça um arquivo novo ao Instagram e envie aqui para ver o que mudou.'}
         </Text>
 
+        {error ? (
+          <View style={s.notaErro}>
+            <Text style={s.notaTitulo}>Não deu para ler esse arquivo</Text>
+            <Text style={s.notaCorpo}>{error}</Text>
+          </View>
+        ) : null}
+
+        {/*
+         * Ação de verdade para quem ainda não tem o arquivo. Antes isto era um
+         * link cinza no meio de outros dois, do mesmo tamanho e da mesma cor —
+         * e era o passo que destrava o app inteiro.
+         */}
+        <Pressable
+          onPress={() => Linking.openURL('https://www.instagram.com/download/request/')}
+          accessibilityRole="link"
+          style={({ pressed }) => [s.cartaoAcaoFora, pressed && s.pressed]}
+        >
+          <Gradiente cores={gradients.suave} style={s.cartaoAcao}>
+            <View style={s.cartaoTexto}>
+              <Text style={s.cartaoTitulo}>Pedir o arquivo ao Instagram</Text>
+              <Text style={s.cartaoCorpo}>Abre a página de download na sua conta</Text>
+            </View>
+            <IconeExterno size={18} cor={colors.gained} />
+          </Gradiente>
+        </Pressable>
+
+        {/* Procedimento, recolhível. */}
+        <Pressable
+          onPress={() => setPassosAbertos((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: passosAbertos }}
+          style={({ pressed }) => [s.cabecalhoPassos, pressed && s.pressed]}
+        >
+          <Text style={s.cabecalhoPassosTexto}>Como pedir, passo a passo</Text>
+          <View style={passosAbertos ? s.setaAberta : undefined}>
+            <IconeAvancar size={18} cor={colors.inkMuted} />
+          </View>
+        </Pressable>
+
+        {passosAbertos ? (
+          <View style={s.passos}>
+            {PASSOS.map((passo, i) => (
+              <View key={passo.title} style={[s.passo, passo.emphasis && s.passoDestaque]}>
+                {/* Numeração faz sentido aqui: é um procedimento em ordem obrigatória. */}
+                <View style={[s.bolha, passo.emphasis && s.bolhaDestaque]}>
+                  <Text style={[s.passoNumero, passo.emphasis && s.passoNumeroDestaque]}>
+                    {i + 1}
+                  </Text>
+                </View>
+                <View style={s.passoTexto}>
+                  <Text style={[s.passoTitulo, passo.emphasis && s.passoTituloDestaque]}>
+                    {passo.title}
+                  </Text>
+                  <Text style={s.passoCorpo}>{passo.body}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <View style={s.promessa}>
           <IconeEscudo />
           <Text style={s.promessaTexto}>
@@ -106,36 +207,6 @@ export function ImportGuideScreen({
             que precisamos deste arquivo — e é o que mantém sua conta longe de risco de bloqueio.
           </Text>
         </View>
-
-        {error ? (
-          <View style={[s.nota, s.notaErro]}>
-            <Text style={s.notaTitulo}>Não deu para ler esse arquivo</Text>
-            <Text style={s.notaCorpo}>{error}</Text>
-          </View>
-        ) : null}
-
-        {PASSOS.map((passo, i) => (
-          <View key={passo.title} style={s.passo}>
-            {/* Numeração faz sentido aqui: é um procedimento em ordem obrigatória. */}
-            <Text style={s.passoNumero}>{i + 1}</Text>
-            <View style={s.passoTexto}>
-              <Text style={[s.passoTitulo, passo.emphasis && s.passoTituloDestaque]}>
-                {passo.title}
-              </Text>
-              <Text style={s.passoCorpo}>{passo.body}</Text>
-            </View>
-          </View>
-        ))}
-
-        {/* `accessibilityRole` nos dois: sem ele o leitor de tela lê o texto
-            como parágrafo e não avisa que dá para tocar. */}
-        <Pressable
-          onPress={() => Linking.openURL('https://www.instagram.com/download/request/')}
-          accessibilityRole="link"
-          style={({ pressed }) => pressed && s.pressed}
-        >
-          <Text style={s.linkSecundario}>Abrir a página de download do Instagram</Text>
-        </Pressable>
 
         <Pressable
           onPress={onAbrirSobreArquivo}
@@ -154,13 +225,31 @@ export function ImportGuideScreen({
        */}
       <View style={s.rodape}>
         <Pressable
-          style={({ pressed }) => [s.primario, importing && s.primarioInativo, pressed && s.pressed]}
+          style={({ pressed }) => [
+            s.primarioFora,
+            ocupado && s.primarioInativo,
+            pressed && s.pressed,
+          ]}
           onPress={onPickFile}
-          disabled={importing}
+          disabled={ocupado}
           accessibilityRole="button"
         >
-          <Text style={s.primarioLabel}>{rotulo}</Text>
+          <Gradiente style={s.primario}>
+            {ocupado ? <ActivityIndicator size="small" color={colors.base} /> : null}
+            <Text style={s.primarioLabel}>{rotulo}</Text>
+          </Gradiente>
         </Pressable>
+
+        {/*
+         * Barra de progresso do arquivo. Num export completo a leitura passa de
+         * um minuto, e a porcentagem no rótulo sozinha não dá a sensação de
+         * avanço que uma barra dá.
+         */}
+        {fase === 'lendo' && progress && progress > 0.01 ? (
+          <View style={s.barra}>
+            <Gradiente style={[s.barraCheia, { width: `${Math.round(progress * 100)}%` }]} />
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -169,13 +258,12 @@ export function ImportGuideScreen({
 const s = StyleSheet.create({
   raiz: { flex: 1, backgroundColor: colors.base },
   screen: { flex: 1 },
-  content: { padding: space.lg, paddingBottom: space.md, gap: space.sm },
+  content: { padding: space.lg, paddingBottom: space.lg, gap: space.sm },
   pressed: { opacity: 0.6 },
 
   title: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
   },
   subtitle: {
     color: colors.inkMuted,
@@ -184,48 +272,65 @@ const s = StyleSheet.create({
     marginBottom: space.sm,
   },
 
-  promessa: {
+  cartaoAcaoFora: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gained,
+    overflow: 'hidden',
+  },
+  cartaoAcao: {
     flexDirection: 'row',
-    gap: space.sm,
-    alignItems: 'flex-start',
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    alignItems: 'center',
+    gap: space.md,
     padding: space.md,
-    marginBottom: space.sm,
   },
-  promessaTexto: {
-    flex: 1,
-    color: colors.inkMuted,
-    fontSize: typography.scale.caption,
-    lineHeight: 19,
-  },
-  promessaForte: { color: colors.ink, fontWeight: typography.weight.semibold },
-
-  nota: {
-    backgroundColor: colors.surface,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.gained,
-    borderRadius: radius.md,
-    padding: space.md,
-    gap: space.xs,
-  },
-  notaErro: { borderLeftColor: colors.danger },
-  notaTitulo: {
-    color: colors.ink,
+  cartaoTexto: { flex: 1, gap: 2 },
+  cartaoTitulo: {
+    color: colors.gained,
     fontSize: typography.scale.body,
     fontWeight: typography.weight.semibold,
   },
-  notaCorpo: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
+  cartaoCorpo: { color: colors.inkMuted, fontSize: typography.scale.caption },
 
-  passo: { flexDirection: 'row', gap: space.md, paddingVertical: space.sm },
+  cabecalhoPassos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: space.md,
+    marginTop: space.xs,
+  },
+  cabecalhoPassosTexto: {
+    color: colors.ink,
+    ...heading.section,
+  },
+  // A seta aponta para a direita quando fechado e para baixo quando aberto —
+  // sem um ícone novo, só girando o que já existe.
+  setaAberta: { transform: [{ rotate: '90deg' }] },
+
+  passos: { gap: space.sm },
+  passo: {
+    flexDirection: 'row',
+    gap: space.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: space.md,
+  },
+  passoDestaque: { borderLeftWidth: 3, borderLeftColor: colors.gained },
+  bolha: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bolhaDestaque: { backgroundColor: colors.gainedSoft },
   passoNumero: {
-    color: colors.inkFaint,
+    color: colors.inkMuted,
     fontSize: typography.scale.caption,
     fontWeight: typography.weight.semibold,
-    width: 18,
-    textAlign: 'center',
-    lineHeight: 22,
   },
+  passoNumeroDestaque: { color: colors.gained },
   passoTexto: { flex: 1, gap: 3 },
   passoTitulo: {
     color: colors.ink,
@@ -235,31 +340,67 @@ const s = StyleSheet.create({
   passoTituloDestaque: { color: colors.gained },
   passoCorpo: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
 
+  promessa: {
+    flexDirection: 'row',
+    gap: space.sm,
+    alignItems: 'flex-start',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: space.md,
+    marginTop: space.md,
+  },
+  promessaTexto: {
+    flex: 1,
+    color: colors.inkMuted,
+    fontSize: typography.scale.caption,
+    lineHeight: 19,
+  },
+  promessaForte: { color: colors.ink, fontWeight: typography.weight.semibold },
+
+  notaErro: {
+    backgroundColor: colors.surface,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.danger,
+    borderRadius: radius.md,
+    padding: space.md,
+    gap: space.xs,
+  },
+  notaTitulo: {
+    color: colors.ink,
+    fontSize: typography.scale.body,
+    fontWeight: typography.weight.semibold,
+  },
+  notaCorpo: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
+
   linkSecundario: {
     color: colors.inkMuted,
     fontSize: typography.scale.caption,
     textAlign: 'center',
-    paddingVertical: space.sm,
+    paddingVertical: space.md,
   },
 
   rodape: {
     padding: space.md,
-    paddingBottom: space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.hairline,
     backgroundColor: colors.base,
+    gap: space.sm,
   },
+  primarioFora: { borderRadius: radius.md, overflow: 'hidden' },
   primario: {
-    backgroundColor: colors.gained,
-    borderRadius: radius.md,
-    minHeight: 48,
+    flexDirection: 'row',
+    gap: space.sm,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primarioInativo: { opacity: 0.5 },
+  primarioInativo: { opacity: 0.6 },
   primarioLabel: {
     color: colors.base,
     fontSize: typography.scale.body,
     fontWeight: typography.weight.semibold,
   },
+
+  barra: { height: 4, borderRadius: radius.pill, backgroundColor: colors.surfaceRaised },
+  barraCheia: { height: 4, borderRadius: radius.pill },
 });

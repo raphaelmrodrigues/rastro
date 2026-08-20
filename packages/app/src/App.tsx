@@ -10,9 +10,9 @@
  *
  * Entre 14 e 16/08/2026 a conta foi obrigatória e esta raiz bloqueava tudo numa
  * tela de login. A reversão é de produto: exigir cadastro antes de a pessoa ver
- * qualquer resultado punha uma parede no começo de um funil que já tem uma
- * espera de até 48h do Instagram no meio, e nenhuma função do app precisava
- * disso para funcionar.
+ * qualquer resultado punha uma parede no começo de um funil que já obriga a
+ * pessoa a sair do app, pedir um arquivo dentro do Instagram e esperar por ele,
+ * e nenhuma função do app precisava disso para funcionar.
  *
  * Onde a conta é oferecida agora: num convite depois do import (`ConviteDeConta`)
  * e no Perfil, sempre. Nunca antes de o app ter entregue alguma coisa.
@@ -21,6 +21,14 @@
  * **Rastro**, nunca a do Instagram, e a tela diz isso antes dos campos. Um
  * formulário de login num app de seguidores é exatamente o que o usuário viu nos
  * apps que queimaram a conta dele.
+ *
+ * ## A primeira abertura (19/08/2026)
+ *
+ * Quem abre o app pela primeira vez cai em `BemVindoScreen`, quatro slides que
+ * antes eram parágrafos empilhados dentro da tela de importar. Passa uma vez
+ * só: o `AJUSTE_BEM_VINDO` marca no disco, e a marca some junto com os dados
+ * quando a pessoa apaga tudo — que é o comportamento certo, porque quem apagou
+ * tudo está começando de novo.
  *
  * ## Navegação
  *
@@ -34,19 +42,19 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { escolherArquivoDoExport } from './lib/arquivo';
+import {
+  useFonts,
+  Outfit_500Medium,
+  Outfit_600SemiBold,
+  Outfit_700Bold,
+} from '@expo-google-fonts/outfit';
+import { ArquivoIlegivel, escolherArquivoDoExport } from './lib/arquivo';
 import { ArquivoNaoEhZip } from './lib/zip';
-import { ImportGuideScreen } from './screens/ImportGuideScreen';
+import { ImportGuideScreen, type FaseDoImport } from './screens/ImportGuideScreen';
+import { BemVindoScreen } from './screens/BemVindoScreen';
 import { DashboardScreen, type ListaId } from './screens/DashboardScreen';
 import { PessoasScreen } from './screens/PessoasScreen';
 import { PeopleListScreen, TITULOS } from './screens/PeopleListScreen';
@@ -65,11 +73,13 @@ import { Header, TabBar, type Aba } from './components/Chrome';
 import { Logotipo } from './components/Marca';
 import { LimiteDeErro } from './components/LimiteDeErro';
 import { ConviteDeConta } from './components/ConviteDeConta';
+import { relatarErro } from './lib/telemetria';
+import { lerAjuste, salvarAjuste } from './lib/storage';
 import { useStore } from './lib/store';
 import { useConta } from './lib/conta';
 import { useBotaoVoltar } from './lib/voltar';
 import { prepararNotificacoes, reagendarLembrete } from './lib/notificacoes';
-import { colors, space, typography } from './lib/theme';
+import { colors, layout, space, typography } from './lib/theme';
 
 /** Tela empilhada sobre a aba atual. `null` = a própria aba. */
 type Empilhada =
@@ -81,6 +91,9 @@ type Empilhada =
   | { nome: 'entrar'; modo: 'entrar' | 'cadastrar'; motivo?: string }
   | null;
 
+/** Chave do ajuste que marca as boas-vindas como já vistas. */
+const AJUSTE_BEM_VINDO = 'bemvindo.visto';
+
 /**
  * Aviso ao usuário. O Alert do react-native-web é um no-op silencioso, e um erro
  * de import que não aparece é pior que um erro feio.
@@ -88,6 +101,23 @@ type Empilhada =
 function avisar(titulo: string, mensagem: string): void {
   if (Platform.OS === 'web') globalThis.alert(`${titulo}\n\n${mensagem}`);
   else Alert.alert(titulo, mensagem);
+}
+
+/**
+ * Título e texto para uma falha de import.
+ *
+ * As duas causas conhecidas ganham mensagem própria porque têm solução própria:
+ * arquivo errado se resolve reenviando o certo, arquivo ilegível se resolve
+ * baixando da nuvem para o celular. A genérica é o último recurso, e o pior
+ * lugar para cair — foi ela que já culpou um arquivo perfeito uma vez.
+ */
+function mensagemDeFalha(erro: unknown): [string, string] {
+  if (erro instanceof ArquivoNaoEhZip) return ['Arquivo não reconhecido', erro.message];
+  if (erro instanceof ArquivoIlegivel) return ['Não deu para abrir o arquivo', erro.message];
+  return [
+    'Não deu para ler o arquivo',
+    'Tente novamente. Se continuar, peça o arquivo ao Instagram de novo.',
+  ];
 }
 
 /**
@@ -101,8 +131,24 @@ function avisar(titulo: string, mensagem: string): void {
 function Raiz({ children }: { children: ReactNode }) {
   return (
     <View style={s.fundo}>
-      <SafeAreaView style={s.root}>
-        <StatusBar style="light" />
+      {/*
+       * `SafeAreaView` do react-native-safe-area-context, e nao o do react-native.
+       *
+       * O do react-native nao faz nada no Android: la ele e uma View comum. O
+       * efeito, num Galaxy A51, era a barra de navegacao do sistema ficar por
+       * cima do botao de escolher arquivo — a acao principal do app, inalcancavel
+       * porque o toque ia para o botao "voltar" do sistema.
+       *
+       * A borda de baixo entra aqui, na moldura, e nao em cada barra fixa: assim
+       * nenhuma tela pode esquecer dela. O preco e a barra de abas nao encostar
+       * na borda do vidro, e ele e zero na pratica — o vao tem a cor do fundo.
+       */}
+      <SafeAreaView style={s.root} edges={['top', 'bottom', 'left', 'right']}>
+        {/*
+          * Ícones escuros na barra de status: o app é de fundo branco, e
+          * `style="light"` desenharia relógio e bateria em branco sobre branco.
+          */}
+        <StatusBar style="dark" />
         {children}
       </SafeAreaView>
     </View>
@@ -118,19 +164,49 @@ function Raiz({ children }: { children: ReactNode }) {
  */
 export default function Rastro() {
   return (
-    <LimiteDeErro>
-      <App />
-    </LimiteDeErro>
+    <SafeAreaProvider>
+      <LimiteDeErro>
+        <App />
+      </LimiteDeErro>
+    </SafeAreaProvider>
   );
 }
 
 function App() {
   const [aba, setAba] = useState<Aba>('inicio');
   const [empilhada, setEmpilhada] = useState<Empilhada>(null);
-  // Cobre o intervalo entre escolher o arquivo e a leitura começar. Num arquivo
-  // completo isso é dezenas de segundos — sem indicador, parece que o botão não
-  // funcionou e o usuário toca de novo.
-  const [lendo, setLendo] = useState(false);
+  /*
+   * Em que ponto do envio o app está.
+   *
+   * Era um booleano que só ligava depois de o arquivo já estar escolhido. O
+   * problema apareceu no primeiro teste em aparelho: o seletor do Android leva
+   * segundos para abrir, e nesse intervalo o botão continuava com o texto
+   * normal, sem indicador nenhum — o toque parecia não ter funcionado. Agora a
+   * fase começa no toque, e não depois dele.
+   */
+  const [fase, setFase] = useState<FaseDoImport>('parado');
+
+  /*
+   * Se as boas-vindas já foram vistas. `null` enquanto a resposta não chegou do
+   * disco — mostrar a tela de importar e depois trocar pelas boas-vindas seria
+   * pior do que esperar os poucos milissegundos da leitura.
+   */
+  const [bemVindoVisto, setBemVindoVisto] = useState<boolean | null>(null);
+
+  /*
+   * Fonte de display dos títulos.
+   *
+   * Os arquivos vêm dentro do app, então "carregar" aqui é ler do disco: alguns
+   * milissegundos, não uma requisição. Ainda assim vale esperar antes de
+   * desenhar — sem isso a primeira tela aparece na fonte do sistema e troca de
+   * letra sozinha um quadro depois, que é o efeito que faz um app parecer mal
+   * montado.
+   */
+  const [fontesProntas] = useFonts({
+    Outfit_500Medium,
+    Outfit_600SemiBold,
+    Outfit_700Bold,
+  });
   /*
    * Convite dispensado nesta sessão.
    *
@@ -150,7 +226,13 @@ function App() {
     // Só configura o canal e o comportamento em primeiro plano. Não pede
     // permissão: isso só acontece quando a pessoa liga o lembrete no perfil.
     void prepararNotificacoes();
+    void lerAjuste(AJUSTE_BEM_VINDO).then((v) => setBemVindoVisto(v === 'sim'));
   }, [boot, iniciar]);
+
+  const concluirBemVindo = useCallback(() => {
+    setBemVindoVisto(true);
+    void salvarAjuste(AJUSTE_BEM_VINDO, 'sim');
+  }, []);
 
   /*
    * Onde cada tela empilhada volta.
@@ -187,12 +269,27 @@ function App() {
 
   useBotaoVoltar(voltar);
 
+  /*
+   * Escolher e importar.
+   *
+   * O `try` abraça a escolha do arquivo também, e isso é o conserto de um bug de
+   * verdade: até 19/08/2026 a chamada ao seletor ficava fora dele. Quando ela
+   * falhava no aparelho — e falhava, porque copiava 479 MB antes de devolver — a
+   * exceção virava uma rejeição de promessa que ninguém pegava. Em produção isso
+   * não imprime nada e não mostra nada: o usuário escolhia o arquivo e a tela
+   * simplesmente não reagia.
+   */
   const escolherArquivo = async () => {
-    const fonte = await escolherArquivoDoExport();
-    if (!fonte) return;
+    // Toque duplo enquanto o seletor abre chamaria o picker duas vezes, e no
+    // Android a segunda chamada deixa a primeira pendurada para sempre.
+    if (fase !== 'parado') return;
 
-    setLendo(true);
+    setFase('escolhendo');
     try {
+      const fonte = await escolherArquivoDoExport();
+      if (!fonte) return;
+
+      setFase('lendo');
       const { ok, message } = await importZip(fonte);
       if (!ok) {
         avisar('Não deu para ler', message ?? 'Tente novamente.');
@@ -205,16 +302,15 @@ function App() {
       setEmpilhada(null);
       setAba('inicio');
     } catch (erro) {
-      // "Não é um zip" tem causa e solução conhecidas; vale dizer qual é em vez
-      // de cair na mensagem genérica, que já culpou um arquivo perfeito uma vez.
-      avisar(
-        erro instanceof ArquivoNaoEhZip ? 'Arquivo não reconhecido' : 'Não deu para ler o arquivo',
-        erro instanceof ArquivoNaoEhZip
-          ? erro.message
-          : 'Tente novamente. Se continuar, peça o arquivo ao Instagram de novo.',
-      );
+      /*
+       * Relata antes de avisar. Esta é a falha que só aparece em aparelho de
+       * verdade, com arquivo de verdade — exatamente a que não dá para reproduzir
+       * no navegador do desenvolvedor, e a que o painel precisa mostrar.
+       */
+      relatarErro(erro, 'import');
+      avisar(...mensagemDeFalha(erro));
     } finally {
-      setLendo(false);
+      setFase('parado');
     }
   };
 
@@ -238,7 +334,7 @@ function App() {
    * quem está sem sinal olhar para a marca até o tempo limite estourar — para
    * chegar num app que funciona offline de qualquer jeito.
    */
-  if (loading) {
+  if (loading || bemVindoVisto === null || !fontesProntas) {
     return (
       <Raiz>
         <View style={s.centro}>
@@ -267,11 +363,28 @@ function App() {
                 : undefined;
 
   const semDados = !snapshot || !reports;
-  const importando = importing || lendo;
+  // O store liga `importing` por conta própria; a fase local cobre o trecho
+  // anterior, que ele não vê. Quem manda é a mais adiantada das duas.
+  const faseDoImport: FaseDoImport = fase !== 'parado' ? fase : importing ? 'lendo' : 'parado';
 
   // Sem nenhum arquivo ainda, o app tem uma coisa só a oferecer. Mostrar abas
   // vazias seria dar cinco caminhos que não levam a lugar nenhum.
   if (semDados) {
+    /*
+     * Boas-vindas, uma vez na vida do app.
+     *
+     * Antes de qualquer outra coisa deste bloco: sem arquivo nenhum e sem nunca
+     * ter visto a apresentação, não há o que o cabeçalho, as abas ou o perfil
+     * tenham a dizer que valha interromper os quatro slides.
+     */
+    if (!bemVindoVisto) {
+      return (
+        <Raiz>
+          <BemVindoScreen aoConcluir={concluirBemVindo} />
+        </Raiz>
+      );
+    }
+
     /*
      * A ordem aqui importa e já causou bug: a versão anterior testava
      * `aba === 'perfil'` antes da tela empilhada. Abrir "Sobre o arquivo" a
@@ -320,7 +433,7 @@ function App() {
             primeiraVez
             onPickFile={escolherArquivo}
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
-            importing={importando}
+            fase={faseDoImport}
             progress={progress}
             error={error}
           />
@@ -416,7 +529,7 @@ function App() {
             primeiraVez={false}
             onPickFile={escolherArquivo}
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
-            importing={importando}
+            fase={faseDoImport}
             progress={progress}
             error={error}
           />
@@ -459,7 +572,7 @@ function AtalhoPerfil({ onPress }: { onPress: () => void }) {
 
 const s = StyleSheet.create({
   fundo: { flex: 1, backgroundColor: colors.base, alignItems: 'center' },
-  root: { flex: 1, width: '100%', maxWidth: 560, backgroundColor: colors.base },
+  root: { flex: 1, width: '100%', maxWidth: layout.maxWidth, backgroundColor: colors.base },
   corpo: { flex: 1 },
   centro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.lg },
   atalhoPerfil: {

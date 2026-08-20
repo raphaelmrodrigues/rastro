@@ -14,8 +14,47 @@
 
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radius, space, typography, chrome } from '../lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import {
+  colors,
+  radius,
+  space,
+  typography,
+  chrome,
+  elevation,
+  gradients,
+  heading,
+} from '../lib/theme';
 import { IconeExterno, IconeAvancar } from './icons';
+
+/**
+ * O gradiente da marca, na diagonal.
+ *
+ * Existe como componente porque as pontas e o ângulo precisam ser os mesmos no
+ * botão, no anel do avatar e em qualquer coisa nova — gradiente repetido à mão
+ * diverge no terceiro uso, e aí o app tem dois roxos que quase combinam, que é
+ * pior do que ter um só.
+ */
+export function Gradiente({
+  cores = gradients.marca,
+  style,
+  children,
+}: {
+  cores?: readonly string[];
+  style?: object;
+  children?: ReactNode;
+}) {
+  return (
+    <LinearGradient
+      colors={cores as unknown as [string, string, ...string[]]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={style}
+    >
+      {children}
+    </LinearGradient>
+  );
+}
 
 export function Screen({ children }: { children: ReactNode }) {
   return <View style={s.screen}>{children}</View>;
@@ -41,20 +80,71 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
  * forma determinística: a mesma pessoa tem sempre a mesma cor, em qualquer tela
  * e em qualquer import, o que ajuda a reconhecer alguém ao correr a lista.
  */
-const TONS_AVATAR = ['#3A3350', '#2F3B52', '#4A3A2C', '#2C4440', '#42324A', '#333F35'] as const;
+const TONS_AVATAR = ['#EADCF8', '#DDE7F6', '#F7E3D5', '#D8EDE6', '#F3DDEB', '#E4EAD6'] as const;
 
-export function Avatar({ username, size = 44 }: { username: string; size?: number }) {
+/** Espessura do aro e o vão entre ele e o disco, em pixels. */
+const ESPESSURA_DO_ARO = 2.5;
+const VAO_DO_ARO = 2.5;
+
+export function Avatar({
+  username,
+  size = 44,
+  anel,
+}: {
+  username: string;
+  size?: number;
+  /**
+   * Aro em gradiente em volta, como o de quem postou algo.
+   *
+   * Serve a dois propósitos ao mesmo tempo, e é por isso que ele não está em
+   * todo avatar: marca quem chegou agora, e é o pedaço de cor que quebra o
+   * branco justamente nas telas mais vazias. Se estivesse em todos, não marcaria
+   * nada e viraria enfeite.
+   */
+  anel?: boolean;
+}) {
   let soma = 0;
   for (let i = 0; i < username.length; i++) soma = (soma + username.charCodeAt(i)) % 997;
   const fundo = TONS_AVATAR[soma % TONS_AVATAR.length];
   const inicial = (username.replace(/[^a-z0-9]/gi, '')[0] ?? '?').toUpperCase();
 
-  return (
+  const disco = (
     <View
-      style={[s.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: fundo }]}
+      style={[
+        s.avatar,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: fundo },
+      ]}
     >
       <Text style={[s.avatarInicial, { fontSize: size * 0.4 }]}>{inicial}</Text>
     </View>
+  );
+
+  if (!anel) return disco;
+
+  // Três camadas: gradiente, um vão da cor do fundo, e o disco. O vão é o que
+  // separa o aro do avatar — sem ele os dois viram uma mancha só.
+  const aro = (ESPESSURA_DO_ARO + VAO_DO_ARO) * 2;
+  return (
+    <Gradiente
+      cores={gradients.aro}
+      style={{
+        width: size + aro,
+        height: size + aro,
+        borderRadius: (size + aro) / 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View
+        style={{
+          padding: VAO_DO_ARO,
+          backgroundColor: colors.base,
+          borderRadius: (size + VAO_DO_ARO * 2) / 2,
+        }}
+      >
+        {disco}
+      </View>
+    </Gradiente>
   );
 }
 
@@ -66,11 +156,14 @@ export function Avatar({ username, size = 44 }: { username: string; size?: numbe
  */
 export function StatRow({
   itens,
+  semLinha,
 }: {
   itens: Array<{ label: string; value: string; tone?: 'neutral' | 'gained' | 'lost'; onPress?: () => void }>;
+  /** Sem a divisória de baixo. Use quando a linha já está dentro de um cartão. */
+  semLinha?: boolean;
 }) {
   return (
-    <View style={s.statRow}>
+    <View style={[s.statRow, semLinha && s.statRowSemLinha]}>
       {itens.map((item) => {
         const cor =
           item.tone === 'gained' ? colors.gained : item.tone === 'lost' ? colors.lost : colors.ink;
@@ -182,6 +275,8 @@ export function PersonRow({
    * Ribeiro" faria a linha parecer um perfil que não existe.
    */
   comoArroba = true,
+  /** Aro em gradiente no avatar. Reservado a quem entrou desde o arquivo anterior. */
+  destaque,
 }: {
   username: string;
   displayName?: string;
@@ -191,12 +286,13 @@ export function PersonRow({
   badge?: string;
   onPress?: () => void;
   comoArroba?: boolean;
+  destaque?: boolean;
 }) {
   const rotulo = comoArroba ? `@${username}` : username;
 
   const conteudo = (pressionado: boolean) => (
     <View style={[s.person, pressionado && s.personPressed]}>
-      <Avatar username={username} />
+      <Avatar username={username} anel={destaque} />
       <View style={s.personText}>
         <Text style={s.personHandle} numberOfLines={1}>
           {rotulo}
@@ -280,6 +376,41 @@ export function Button({
   disabled?: boolean;
 }) {
   const isPrimary = variant === 'primary';
+
+  const rotulo = (
+    <Text
+      style={[
+        s.buttonLabel,
+        isPrimary && s.buttonLabelPrimary,
+        variant === 'danger' && s.buttonLabelDanger,
+      ]}
+    >
+      {label}
+    </Text>
+  );
+
+  /*
+   * O primário é um gradiente, e por isso ele não pode ser um `backgroundColor`
+   * no mesmo Pressable: o LinearGradient precisa ser um nó próprio. O Pressable
+   * fica por fora, sem fundo, e o gradiente ocupa tudo por dentro.
+   */
+  if (isPrimary) {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          s.buttonPrimarioFora,
+          disabled && s.buttonDisabled,
+          pressed && !disabled && s.pressed,
+        ]}
+      >
+        <Gradiente style={s.buttonPrimarioDentro}>{rotulo}</Gradiente>
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       onPress={onPress}
@@ -287,7 +418,6 @@ export function Button({
       accessibilityRole="button"
       style={({ pressed }) => [
         s.button,
-        isPrimary && s.buttonPrimary,
         variant === 'secondary' && s.buttonSecondary,
         variant === 'ghost' && s.buttonGhost,
         variant === 'danger' && s.buttonDanger,
@@ -295,15 +425,7 @@ export function Button({
         pressed && !disabled && s.pressed,
       ]}
     >
-      <Text
-        style={[
-          s.buttonLabel,
-          isPrimary && s.buttonLabelPrimary,
-          variant === 'danger' && s.buttonLabelDanger,
-        ]}
-      >
-        {label}
-      </Text>
+      {rotulo}
     </Pressable>
   );
 }
@@ -328,11 +450,7 @@ const s = StyleSheet.create({
     marginTop: space.lg,
     marginBottom: space.sm,
   },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: typography.scale.section,
-    fontWeight: typography.weight.semibold,
-  },
+  sectionTitle: { color: colors.ink, ...heading.section },
 
   avatar: { alignItems: 'center', justifyContent: 'center' },
   avatarInicial: { color: colors.ink, fontWeight: typography.weight.semibold },
@@ -343,17 +461,21 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.hairline,
   },
+  statRowSemLinha: { borderBottomWidth: 0 },
   statCol: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: space.xs },
-  statValue: { fontSize: typography.scale.title, fontWeight: typography.weight.bold },
+  statValue: heading.numero,
   statLabel: { color: colors.inkMuted, fontSize: typography.scale.caption },
 
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.base,
     borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: space.md,
     flex: 1,
     minWidth: 140,
     gap: space.xs,
+    ...elevation.cartao,
   },
   cardLabel: {
     color: colors.inkMuted,
@@ -361,7 +483,7 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  cardValue: { fontSize: typography.scale.title, fontWeight: typography.weight.bold },
+  cardValue: heading.numero,
   cardHint: { color: colors.inkFaint, fontSize: typography.scale.micro },
 
   banner: {
@@ -374,8 +496,8 @@ const s = StyleSheet.create({
   },
   bannerTitle: {
     color: colors.ink,
+    fontFamily: typography.display.semibold,
     fontSize: typography.scale.body,
-    fontWeight: typography.weight.semibold,
   },
   bannerBody: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
 
@@ -427,15 +549,28 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonPrimary: { backgroundColor: colors.gained },
+  buttonPrimarioFora: {
+    borderRadius: radius.md,
+    minHeight: chrome.touchMin + 8,
+    overflow: 'hidden',
+    ...elevation.cartao,
+  },
+  buttonPrimarioDentro: {
+    flex: 1,
+    minHeight: chrome.touchMin + 8,
+    paddingHorizontal: space.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   buttonSecondary: { backgroundColor: colors.surfaceRaised },
   buttonGhost: { borderWidth: 1, borderColor: colors.border },
   buttonDanger: { borderWidth: 1, borderColor: colors.danger },
   buttonDisabled: { opacity: 0.4 },
   buttonLabel: {
     color: colors.ink,
+    fontFamily: typography.display.semibold,
     fontSize: typography.scale.body,
-    fontWeight: typography.weight.semibold,
+    letterSpacing: -0.1,
   },
   buttonLabelPrimary: { color: colors.base },
   buttonLabelDanger: { color: colors.danger },
@@ -443,8 +578,8 @@ const s = StyleSheet.create({
   empty: { padding: space.xl, alignItems: 'center', gap: space.sm },
   emptyTitle: {
     color: colors.ink,
+    fontFamily: typography.display.semibold,
     fontSize: typography.scale.body,
-    fontWeight: typography.weight.semibold,
   },
   emptyBody: {
     color: colors.inkMuted,

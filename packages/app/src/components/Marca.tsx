@@ -103,7 +103,9 @@ const s = StyleSheet.create({
   linha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nome: {
     color: colors.ink,
-    fontWeight: typography.weight.bold,
-    letterSpacing: -0.8,
+    // A mesma família de display dos títulos. O nome do app escrito na fonte do
+    // sistema era o detalhe que fazia o cabeçalho parecer sem identidade.
+    fontFamily: typography.display.bold,
+    letterSpacing: -1,
   },
 });

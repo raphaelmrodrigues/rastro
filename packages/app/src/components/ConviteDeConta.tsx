@@ -4,9 +4,9 @@
  * ## Por que aqui, e não na abertura
  *
  * Pedir cadastro antes de a pessoa ver qualquer resultado é a forma mais cara de
- * perder usuário num funil que já tem uma espera de até 48h do Instagram no
- * meio. Depois do import é o oposto: ela acabou de ver a própria rede na tela e
- * tem algo concreto a perder.
+ * perder usuário num funil que já obriga a sair do app e esperar por um arquivo.
+ * Depois do import é o oposto: ela acabou de ver a própria rede na tela e tem
+ * algo concreto a perder.
  *
  * O texto vende exatamente isso — não perder — em vez de "sincronize seus
  * dados", que é vocabulário de quem construiu o app.
@@ -21,7 +21,7 @@
 
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from './ui';
-import { colors, radius, space, typography } from '../lib/theme';
+import { colors, elevation, radius, space, typography } from '../lib/theme';
 
 interface Props {
   /** Quantos arquivos existem neste aparelho. Muda o peso do argumento. */
@@ -68,17 +68,29 @@ export function ConviteDeConta({ snapshotCount, onCriarConta, onEntrar, onDispen
 }
 
 const s = StyleSheet.create({
+  /*
+   * Cartão branco elevado, e não mais um segundo bloco de gradiente.
+   *
+   * O convite fica logo abaixo do cabeçalho do painel, que já é um cartão com
+   * gradiente. Dois blocos coloridos empilhados viravam uma parede rosa sem
+   * hierarquia: não dava para dizer qual era o retrato da rede e qual era o
+   * anúncio. A cor do convite mora onde ela convence, que é o botão.
+   */
   caixa: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.base,
     borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: space.md,
     gap: space.xs,
     marginBottom: space.md,
+    ...elevation.cartao,
   },
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.body,
-    fontWeight: typography.weight.semibold,
+    fontFamily: typography.display.semibold,
+    fontSize: typography.scale.section,
+    letterSpacing: -0.2,
   },
   corpo: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
   nota: { color: colors.inkFaint, fontSize: typography.scale.micro, lineHeight: 17, marginTop: 2 },

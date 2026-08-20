@@ -17,7 +17,7 @@
 import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../components/ui';
 import { Logotipo } from '../components/Marca';
-import { colors, space, typography } from '../lib/theme';
+import { colors, heading, space, typography } from '../lib/theme';
 
 /**
  * Onde o app mora em cada loja.
@@ -72,8 +72,7 @@ const s = StyleSheet.create({
   },
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
     marginTop: space.md,
   },
   corpo: {

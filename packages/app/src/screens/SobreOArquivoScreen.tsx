@@ -27,7 +27,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Banner } from '../components/ui';
 import { IconeEscudo } from '../components/icons';
-import { colors, radius, space, typography } from '../lib/theme';
+import { colors, heading, radius, space, typography } from '../lib/theme';
 
 /** O voltar fica no cabeçalho, montado pelo App — a tela não desenha o seu. */
 export function SobreOArquivoScreen() {
@@ -146,8 +146,7 @@ const s = StyleSheet.create({
 
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
     marginBottom: space.sm,
   },
   lead: {
@@ -174,8 +173,7 @@ const s = StyleSheet.create({
 
   secao: {
     color: colors.ink,
-    fontSize: typography.scale.section,
-    fontWeight: typography.weight.semibold,
+    ...heading.section,
     marginTop: space.lg,
     marginBottom: space.sm,
   },

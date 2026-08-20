@@ -17,7 +17,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ActivityData } from '@rastro/core';
 import { Button, MenuRow, SectionTitle } from '../components/ui';
 import { IconeEscudo } from '../components/icons';
-import { colors, radius, space, typography } from '../lib/theme';
+import { colors, heading, radius, space, typography } from '../lib/theme';
 import { formatNumber, formatRelative } from '../lib/format';
 import type { ListaDeAtividade } from './AtividadeListaScreen';
 
@@ -184,8 +184,7 @@ const s = StyleSheet.create({
 
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
   },
   explicacao: {
     color: colors.inkMuted,

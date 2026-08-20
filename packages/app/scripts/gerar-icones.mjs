@@ -27,10 +27,37 @@ const DESTINO = join(AQUI, '..', 'assets');
 // Mesmos valores de lib/theme.ts. Duplicados de propósito: este script roda em
 // Node e não pode importar um módulo que o Metro transforma.
 const COR = {
-  base: [0x15, 0x18, 0x24],
-  inkFaint: [0x6b, 0x72, 0x90],
-  inkMuted: [0x9b, 0xa1, 0xb8],
-  gained: [0xe8, 0xa3, 0x3d],
+  base: [0xff, 0xff, 0xff],
+  inkFaint: [0x7c, 0x82, 0x93],
+  inkMuted: [0x5e, 0x64, 0x74],
+  gained: [0x7b, 0x2f, 0xbe],
+};
+
+/**
+ * Paletas do desenho.
+ *
+ * `naTela` é a marca como ela aparece dentro do app: roxo sobre branco. Serve
+ * ao splash, que fica sobre o mesmo branco.
+ *
+ * `noRoxo` é a inversão, para o ícone do launcher e da loja. Um ícone branco com
+ * traço cinza desaparece na gaveta de apps de qualquer aparelho de fundo claro —
+ * o ícone precisa ser o bloco de cor, e o desenho, o vazado dentro dele.
+ *
+ * `monocromatica` existe porque o Android descarta as cores do ícone de
+ * notificação e usa só o canal alfa. Ver o comentário em `notification-icon`.
+ */
+const PALETA = {
+  naTela: { fraco: COR.inkFaint, medio: COR.inkMuted, forte: COR.gained },
+  noRoxo: {
+    fraco: [0xc9, 0xa8, 0xe8],
+    medio: [0xe2, 0xd0, 0xf5],
+    forte: [0xff, 0xff, 0xff],
+  },
+  monocromatica: {
+    fraco: [0xff, 0xff, 0xff],
+    medio: [0xff, 0xff, 0xff],
+    forte: [0xff, 0xff, 0xff],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -207,8 +234,7 @@ const CAIXA = { x0: 4 - 2, y0: 7 - 3.5, x1: 28 + 3.5, y1: 26 + 2 };
  * é recortado pelo sistema em círculo, quadrado arredondado ou gota, e só os 66%
  * centrais são garantidos — por isso ele pede um valor menor.
  */
-function desenharMarca(tela, ocupacao, corForcada = null) {
-  const c = (padrao) => corForcada ?? padrao;
+function desenharMarca(tela, ocupacao, paleta = PALETA.naTela) {
   const largura = CAIXA.x1 - CAIXA.x0;
   const altura = CAIXA.y1 - CAIXA.y0;
   const escala = (tela.lado * ocupacao) / Math.max(largura, altura);
@@ -219,32 +245,32 @@ function desenharMarca(tela, ocupacao, corForcada = null) {
   const py = (v) => topo + v * escala;
   const e = 2 * escala; // espessura de traço, igual à do SVG
 
-  tela.linha(px(4), py(26), px(11), py(21), e, c(COR.inkFaint));
-  tela.linha(px(11), py(21), px(17), py(23), e, c(COR.inkFaint));
+  tela.linha(px(4), py(26), px(11), py(21), e, paleta.fraco);
+  tela.linha(px(11), py(21), px(17), py(23), e, paleta.fraco);
   tela.tracejada(
     px(17),
     py(23),
     px(28),
     py(7),
     e,
-    c(COR.gained),
+    paleta.forte,
     2.2 * escala,
     2.4 * escala,
     4 * escala,
     5 * escala,
   );
 
-  tela.circulo(px(4), py(26), 2 * escala, c(COR.inkFaint));
-  tela.circulo(px(11), py(21), 2 * escala, c(COR.inkFaint));
-  tela.circulo(px(17), py(23), 2.5 * escala, c(COR.inkMuted));
-  tela.circulo(px(28), py(7), 3.5 * escala, c(COR.gained));
+  tela.circulo(px(4), py(26), 2 * escala, paleta.fraco);
+  tela.circulo(px(11), py(21), 2 * escala, paleta.fraco);
+  tela.circulo(px(17), py(23), 2.5 * escala, paleta.medio);
+  tela.circulo(px(28), py(7), 3.5 * escala, paleta.forte);
 }
 
 // ---------------------------------------------------------------------------
 
-function gerar(nome, lado, { fundo, ocupacao, corForcada = null }) {
+function gerar(nome, lado, { fundo, ocupacao, paleta = PALETA.naTela }) {
   const tela = new Tela(lado, fundo);
-  desenharMarca(tela, ocupacao, corForcada);
+  desenharMarca(tela, ocupacao, paleta);
   const caminho = join(DESTINO, nome);
   writeFileSync(caminho, png(lado, lado, tela.px));
   return caminho;
@@ -253,13 +279,18 @@ function gerar(nome, lado, { fundo, ocupacao, corForcada = null }) {
 mkdirSync(DESTINO, { recursive: true });
 
 const arquivos = [
-  // Ícone da loja e do launcher: fundo sólido, o sistema arredonda por fora.
-  gerar('icon.png', 1024, { fundo: COR.base, ocupacao: 0.62 }),
-  // Camada de frente do ícone adaptativo: transparente, com margem de recorte.
-  gerar('adaptive-icon.png', 1024, { fundo: null, ocupacao: 0.44 }),
-  // Splash: só a marca, sobre a cor definida em app.json.
+  // Ícone da loja e do launcher: bloco roxo, o sistema arredonda por fora.
+  gerar('icon.png', 1024, { fundo: COR.gained, ocupacao: 0.62, paleta: PALETA.noRoxo }),
+  /*
+   * Camada de frente do ícone adaptativo: transparente, com margem de recorte.
+   * O roxo de trás vem do `adaptiveIcon.backgroundColor` do app.json — os dois
+   * precisam continuar sendo a mesma cor, senão o ícone do Android fica com um
+   * desenho claro sobre um fundo que não combina com o da loja.
+   */
+  gerar('adaptive-icon.png', 1024, { fundo: null, ocupacao: 0.44, paleta: PALETA.noRoxo }),
+  // Splash: só a marca, sobre o branco definido em app.json.
   gerar('splash-icon.png', 1024, { fundo: null, ocupacao: 0.5 }),
-  gerar('favicon.png', 64, { fundo: COR.base, ocupacao: 0.66 }),
+  gerar('favicon.png', 64, { fundo: COR.gained, ocupacao: 0.66, paleta: PALETA.noRoxo }),
   /*
    * Ícone pequeno da notificação no Android.
    *
@@ -275,7 +306,7 @@ const arquivos = [
   gerar('notification-icon.png', 96, {
     fundo: null,
     ocupacao: 0.82,
-    corForcada: [0xff, 0xff, 0xff],
+    paleta: PALETA.monocromatica,
   }),
 ];
 

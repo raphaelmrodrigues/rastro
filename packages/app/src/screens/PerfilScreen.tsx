@@ -24,7 +24,7 @@ import { Lembretes } from '../components/Lembretes';
 import { IconeEscudo } from '../components/icons';
 import { useConta } from '../lib/conta';
 import { API_URL, VERSAO_DO_APP } from '../api/client';
-import { colors, radius, space, typography } from '../lib/theme';
+import { colors, heading, radius, space, typography } from '../lib/theme';
 
 interface Props {
   /** Quantos arquivos já foram enviados neste aparelho. */
@@ -286,15 +286,13 @@ const s = StyleSheet.create({
   cabecalhoTexto: { flex: 1, gap: 2 },
   handle: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
   },
   sub: { color: colors.inkMuted, fontSize: typography.scale.caption },
 
   titulo: {
     color: colors.ink,
-    fontSize: typography.scale.title,
-    fontWeight: typography.weight.bold,
+    ...heading.title,
   },
   explicacao: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
   input: {

@@ -64,12 +64,20 @@ Responde à pergunta "dá para usar sem baixar o arquivo?". Ver `docs/MODO-CONEC
 
 ## Marco 4 — publicação
 
-- [ ] Política de privacidade real, escrita antes da submissão
+- [x] Política de privacidade real, escrita antes da submissão
+- [x] Contas de desenvolvedor: Google (USD 25 único), verificada. Apple ainda não
+- [x] Telemetria de falha de parsing, para descobrir cedo quando o Instagram
+      mudar o formato do export
+- [ ] Testar num aparelho de verdade. Nada do que está abaixo vale antes disso,
+      e até hoje o app só rodou no navegador
+- [ ] Teste fechado com 12 testadores por 14 dias corridos: é o relógio mais
+      longo do lançamento, então começa primeiro
 - [ ] Descrição nas lojas usando linguagem precisa, deliberadamente diferente
       da dos apps golpistas do nicho
-- [ ] Contas de desenvolvedor: Apple (USD 99/ano) e Google (USD 25 único)
-- [ ] Telemetria de falha de parsing, para descobrir cedo quando o Instagram
-      mudar o formato do export
+- [ ] Screenshots e gráfico de destaque 1024x500
+- [ ] Formulário de Segurança dos dados da Play Console
+
+O passo a passo está em `PUBLICAR-PLAY.md`.
 
 ## Marco 5 — monetização, se houver tração
 

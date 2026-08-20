@@ -13,7 +13,7 @@
 
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, space, typography, chrome } from '../lib/theme';
+import { chrome, colors, heading, space, typography } from '../lib/theme';
 import { Logotipo } from './Marca';
 import {
   IconeInicio,
@@ -124,8 +124,7 @@ const s = StyleSheet.create({
   titulo: {
     flex: 1,
     color: colors.ink,
-    fontSize: typography.scale.section,
-    fontWeight: typography.weight.semibold,
+    ...heading.section,
   },
   headerAcao: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: space.sm },
 
@@ -138,7 +137,7 @@ const s = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   tabRotulo: { color: colors.inkFaint, fontSize: typography.scale.micro - 1 },
-  tabRotuloAtivo: { color: colors.gained, fontWeight: typography.weight.medium },
+  tabRotuloAtivo: { color: colors.gained, fontFamily: typography.display.semibold },
 
   pressed: { opacity: 0.55 },
 });

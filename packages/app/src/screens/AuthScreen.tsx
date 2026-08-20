@@ -10,7 +10,7 @@
  * plano pago.
  *
  * Cobrar cadastro antes de a pessoa ver qualquer valor era a primeira parede de
- * um funil que já tem uma espera de até 48h do Instagram no meio. Agora ela é
+ * um funil que já obriga a sair do app e esperar por um arquivo. Agora ela é
  * alcançada por convite, depois do primeiro import, e pelo Perfil.
  *
  * ## O texto

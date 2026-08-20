@@ -181,7 +181,7 @@ async function agendar(dias: number, ultimaAtualizacao: number | null): Promise<
        * esperando ver novidade agora, descobre que precisa pedir o arquivo ao
        * Instagram e esperar até 48h, e o lembrete vira frustração em vez de ajuda.
        */
-      body: 'Peça um arquivo novo ao Instagram para ver quem entrou e quem saiu. Ele pode levar até 48h para ficar pronto.',
+      body: 'Peça um arquivo novo ao Instagram para ver quem entrou e quem saiu. Costuma ficar pronto em poucos minutos.',
       sound: false,
     },
     trigger: {

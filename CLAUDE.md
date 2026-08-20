@@ -159,6 +159,69 @@ parsing e de erro fatal para `POST /reports`. Só código, arquivo e contagem �
 O schema no servidor é `.strict()` e há testes travando isso. O painel do dono fica em
 `/admin`, protegido por `ADMIN_EMAILS`, e não mostra dado de snapshot de ninguém.
 
+**Primeiro teste em aparelho (19/08/2026).** Um Galaxy A51 com o APK do perfil
+`preview` derrubou três coisas que o navegador nunca mostraria, e as três estão
+consertadas:
+
+- **O import não funcionava.** `escolherArquivoDoExport` pedia
+  `copyToCacheDirectory: true`, e o Android copiava o zip inteiro antes de
+  devolver — sem retorno visível na tela. Quando a cópia falhava, a exceção caía
+  fora do `try` do `escolherArquivo` e virava rejeição não tratada: silêncio
+  absoluto. Agora o `content://` é aberto direto (`File.open(FileMode.ReadOnly)`
+  aceita SAF desde o SDK 57), a cópia sobrou só como fallback, o `try` cobre a
+  escolha e toda falha vira `relatarErro` + alerta com causa.
+- **A barra de navegação do sistema cobria o botão principal.** O `SafeAreaView`
+  do `react-native` não faz nada no Android. Entrou
+  `react-native-safe-area-context` — **módulo nativo, exige build novo**.
+- **A tela de importar era uma parede de texto na primeira abertura.** Virou
+  `screens/BemVindoScreen.tsx`, quatro slides, e o procedimento na tela de
+  importar agora vem recolhido a partir da segunda visita.
+
+Nada disso é testável no `expo start --web`. O caminho nativo de arquivo, a área
+segura e o botão voltar só existem no aparelho — teste lá antes de dar por feito.
+
+**Tema claro e a espera real (19/08/2026).** Duas correções vindas do mesmo teste em aparelho:
+
+- **O app é branco e roxo**, por decisão do dono. Os tokens estão em
+  `packages/app/src/lib/theme.ts`, que documenta a fronteira: copiar a
+  **estrutura** do Instagram (fundo branco, abas embaixo, listas com avatar
+  redondo) é gramática de app e é o que reduz o custo de aprender a usar; copiar
+  **logotipo, nome ou o gradiente roxo-rosa-laranja** é motivo de remoção das
+  lojas, e continua proibido. O roxo daqui é um violeta próprio e a marca segue
+  sendo a trilha de `components/Marca.tsx`. As cores do gerador de ícones
+  (`scripts/gerar-icones.mjs`) são duplicadas de propósito — ele roda em Node e
+  não pode importar o tema; se mudar um, mude o outro.
+- **A espera do export é de minutos, não de 48 horas.** Medido no aparelho do
+  dono: pedindo só "Seguidores e seguindo", o arquivo chegou em ~5 minutos. As 48h
+  são o teto que o Instagram publica e valem para quem pede o export completo.
+  Anunciá-las como regra assusta na hora errada e faz desistir gente que teria o
+  arquivo em minutos — então a ressalva existe, mas em letra miúda. Onde o texto
+  fala de espera: `BemVindoScreen`, o passo 6 de `ImportGuideScreen`,
+  `notificacoes.ts` e `AtividadeScreen` (esta última fala do export **completo**,
+  onde as horas são reais — não uniformize).
+
+**Tipografia e gradientes (20/08/2026).** Segunda passada de layout, também a
+pedido do dono, que achou o resultado anterior "com cara de HTML sem estilo":
+
+- **Títulos usam a Outfit**, empacotada via `@expo-google-fonts/outfit` — não há
+  download em runtime. Os presets estão em `heading` (`theme.ts`) e já trazem
+  família, corpo e espaçamento entre letras. **Quem passa `fontFamily` não passa
+  `fontWeight`**: o peso está no nome do arquivo, e combinar os dois faz o Android
+  sintetizar um negrito falso por cima de um arquivo que já é negrito. O corpo do
+  texto continua na fonte do sistema, que é a que se lê mais rápido em 13px.
+- **O roxo é gradiente**, não cor chapada: `gradients.marca` no botão e na barra
+  de progresso, `gradients.aro` no anel do avatar, `gradients.suave` no cabeçalho
+  do painel e nos halos das boas-vindas. Use sempre o componente `Gradiente`
+  (`components/ui.tsx`) — gradiente repetido à mão diverge no terceiro uso.
+- **O anel do avatar não é enfeite.** Ele marca o dono da conta no painel e quem
+  entrou desde o arquivo anterior. Espalhá-lo por todos os avatares tira o
+  significado e deixa a lista de quem saiu com cara de festa.
+- **O fundo é off-white lilás** (`#FCFBFE`), não branco puro. Branco de papel numa
+  tela inteira lê como página sem folha de estilo.
+
+Dependências nativas que entraram e **exigem build novo**: `expo-font`,
+`expo-linear-gradient` e `react-native-safe-area-context`.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 

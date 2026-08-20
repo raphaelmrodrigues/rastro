@@ -4,14 +4,14 @@
     "slug": "rastro",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "description": "Acompanhe quem entrou e quem saiu da sua lista de seguidores, usando o export oficial de dados do Instagram. Nao pedimos sua senha.",
     "icon": "./assets/icon.png",
-    "backgroundColor": "#151824",
+    "backgroundColor": "#FFFFFF",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#151824"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": false,
@@ -21,7 +21,7 @@
       "package": "com.urlsnapshot.rastro",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#151824"
+        "backgroundColor": "#7B2FBE"
       }
     },
     "web": {
@@ -34,10 +34,17 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#e8a33d"
+          "color": "#7B2FBE"
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cb809037-aee4-4246-9af8-f6ea833beab3"
+      }
+    },
+    "owner": "raphaelmr"
   }
 }

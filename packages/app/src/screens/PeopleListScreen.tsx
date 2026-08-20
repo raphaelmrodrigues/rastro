@@ -289,6 +289,12 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
             ) : null}
           </View>
         }
+        /*
+         * Aro colorido só na lista de quem entrou: é a única em que o destaque
+         * significa alguma coisa, e a única que o usuário abre com expectativa
+         * boa. Nas outras ele seria enfeite — e enfeite numa lista de quem saiu
+         * é de mau gosto.
+         */
         renderItem={({ item }) => (
           <PersonRow
             username={item.username}
@@ -296,6 +302,7 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
             {...(item.detail ? { detail: item.detail } : {})}
             {...(item.approximate ? { approximate: true } : {})}
             {...(item.badge ? { badge: item.badge } : {})}
+            {...(lista === 'entraram' ? { destaque: true } : {})}
             onPress={() => abrir(item.username)}
           />
         )}

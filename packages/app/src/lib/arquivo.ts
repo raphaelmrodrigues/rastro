@@ -20,12 +20,49 @@
  * leitura e corromper a emenda. A API nova abre um `FileHandle` e lê bytes
  * brutos numa posição arbitrária. Some a conversão, some o alinhamento, e some
  * a classe de bug que vinha com eles.
+ *
+ * ## Por que não copiamos mais o arquivo (19/08/2026)
+ *
+ * Até aqui pedíamos `copyToCacheDirectory: true`, na suposição de que um
+ * `content://` do seletor do Android não podia ser aberto por intervalo. Isso
+ * deixou de ser verdade: no SDK 57 o `File.open()` aceita URI do SAF e assume
+ * `FileMode.ReadOnly` sozinho.
+ *
+ * A suposição custava caro. A cópia duplicava o arquivo inteiro — 479 MB no
+ * export real — antes de o app ler um byte, e durante essa cópia o seletor
+ * simplesmente não retornava: da tela, o toque no botão não produzia nada, por
+ * minutos, sem barra de progresso, sem mensagem. Em aparelho sem espaço
+ * sobrando a cópia falhava, e a falha chegava como rejeição de promessa que
+ * ninguém pegava, ou seja, silêncio absoluto.
+ *
+ * Agora o `content://` é aberto direto. A cópia continua existindo como
+ * **fallback**, para o aparelho em que a abertura direta falhar, e só nesse
+ * caso o arquivo copiado é apagado no fim.
  */
 
 import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
+import { File, FileMode, Paths } from 'expo-file-system';
 import type { FonteArquivo } from './zip';
+
+/**
+ * O arquivo foi escolhido, mas o app não conseguiu abri-lo para leitura.
+ *
+ * Separado de `ArquivoNaoEhZip` porque a causa e a saída são outras: aqui o
+ * problema é acesso ou espaço, não o conteúdo. A mensagem carrega o motivo do
+ * sistema porque, sem ele, esta falha é invisível — foi assim que ela passou
+ * despercebida até o primeiro teste em aparelho de verdade.
+ */
+export class ArquivoIlegivel extends Error {
+  constructor(motivo: string) {
+    super(
+      'O app não conseguiu abrir esse arquivo. Se ele estiver no Google Drive ou em outra ' +
+        'nuvem, baixe para o celular antes de enviar. ' +
+        `(detalhe técnico: ${motivo})`,
+    );
+    this.name = 'ArquivoIlegivel';
+  }
+}
 
 /** Devolve null quando o usuário desiste da escolha. */
 export async function escolherArquivoDoExport(): Promise<FonteArquivo | null> {
@@ -65,27 +102,40 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
   const resultado = await DocumentPicker.getDocumentAsync({
     // O Instagram entrega .zip; alguns aparelhos reportam o mime genérico.
     type: ['application/zip', 'application/octet-stream', '*/*'],
-    /*
-     * A cópia é necessária, e não é escolha nossa: no Android o seletor devolve
-     * um `content://` que a API de arquivos não consegue abrir por intervalo, e
-     * ler por intervalo é o que evita carregar o zip inteiro na memória. Sem a
-     * cópia, o import de um export grande não funciona.
-     *
-     * O preço é um segundo arquivo do mesmo tamanho no cache do app — 479 MB no
-     * export real de teste. Por isso `fechar()` apaga a cópia. Ver abaixo.
-     */
-    copyToCacheDirectory: true,
+    copyToCacheDirectory: false,
   });
 
   const escolhido = resultado.canceled ? undefined : resultado.assets?.[0];
   if (!escolhido) return null;
 
-  const arquivo = new File(escolhido.uri);
-  const tamanho = escolhido.size ?? arquivo.size;
+  const original = new File(escolhido.uri);
+  const { arquivo, ehCopia } = abrirOuCopiar(original);
 
-  // Um handle só para o import inteiro: reabrir a cada bloco custaria uma syscall
-  // por 3 MB, e num export de 479 MB isso são ~160 aberturas desnecessárias.
-  const handle = arquivo.open();
+  /*
+   * Um handle só para o import inteiro: reabrir a cada bloco custaria uma
+   * syscall por 3 MB, e num export de 479 MB isso são ~160 aberturas
+   * desnecessárias.
+   */
+  let handle;
+  try {
+    handle = arquivo.open(FileMode.ReadOnly);
+  } catch (erro) {
+    if (ehCopia) descartarCopiaDoCache(arquivo);
+    throw new ArquivoIlegivel(mensagemDe(erro));
+  }
+
+  /*
+   * O tamanho é obrigatório: o descompactador lê por intervalo e, sem saber
+   * onde o arquivo termina, o import roda em falso e falha no fim com uma
+   * mensagem que não ajuda ninguém. Em `content://` o seletor às vezes não
+   * informa o tamanho, daí a segunda tentativa pelo próprio arquivo.
+   */
+  const tamanho = escolhido.size ?? arquivo.size;
+  if (!tamanho || tamanho <= 0) {
+    handle.close();
+    if (ehCopia) descartarCopiaDoCache(arquivo);
+    throw new ArquivoIlegivel('o sistema não informou o tamanho do arquivo');
+  }
 
   return {
     nome: escolhido.name ?? 'export.zip',
@@ -96,30 +146,52 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
     },
     fechar() {
       handle.close();
-      descartarCopiaDoCache(arquivo);
+      // Só apaga o que foi este código que criou. O arquivo do usuário nunca.
+      if (ehCopia) descartarCopiaDoCache(arquivo);
     },
   };
 }
 
 /**
- * Apaga a cópia que o seletor fez no cache do app.
+ * Devolve o arquivo que dá para abrir por intervalo.
  *
- * Sem isto, cada import deixa um zip inteiro parado no aparelho: no export de
- * teste, 479 MB por importação, somados aos 479 MB que o usuário já tem na pasta
- * de downloads. O sistema até limpa cache sozinho, mas só sob pressão de espaço
- * e sem hora marcada — na prática a pessoa perde quase 1 GB e não sabe por quê.
+ * O caminho normal é o próprio arquivo escolhido, sem cópia nenhuma. A cópia só
+ * acontece se o aparelho recusar a abertura direta — e aí ela é o preço de o
+ * import funcionar, não o padrão que todo mundo paga.
+ */
+function abrirOuCopiar(original: File): { arquivo: File; ehCopia: boolean } {
+  try {
+    // Abrir e fechar na hora é a única forma barata de saber se dá: o custo é
+    // um descritor por alguns microssegundos, contra 479 MB de cópia.
+    original.open(FileMode.ReadOnly).close();
+    return { arquivo: original, ehCopia: false };
+  } catch {
+    // Silêncio proposital: o erro que interessa é o da cópia, abaixo, ou o da
+    // abertura definitiva em quem chamou.
+  }
+
+  const destino = new File(Paths.cache, `import-${Date.now()}.zip`);
+  try {
+    original.copySync(destino);
+  } catch (erro) {
+    throw new ArquivoIlegivel(mensagemDe(erro));
+  }
+  return { arquivo: destino, ehCopia: true };
+}
+
+function mensagemDe(erro: unknown): string {
+  return erro instanceof Error ? erro.message : String(erro);
+}
+
+/**
+ * Apaga a cópia de emergência feita por `abrirOuCopiar`.
  *
- * `fechar()` roda no `finally` do import (ver zip.ts), então isto vale também
- * quando a leitura falha no meio — que é justamente quando um arquivo grande
- * ficaria esquecido.
+ * A verificação de caminho continua aqui como cinto e suspensório: um dia
+ * alguém pode passar por engano o arquivo do próprio usuário, e apagá-lo
+ * destruiria um download que levou até 48h para chegar.
  */
 function descartarCopiaDoCache(arquivo: File): void {
   try {
-    /*
-     * Só apaga dentro do cache. Em alguns aparelhos o seletor devolve o caminho
-     * real do arquivo escolhido em vez de uma cópia, e aí apagar destruiria o
-     * download do próprio usuário — que ele levou até 48h para conseguir.
-     */
     if (!arquivo.uri.startsWith(Paths.cache.uri)) return;
     if (arquivo.exists) arquivo.delete();
   } catch {

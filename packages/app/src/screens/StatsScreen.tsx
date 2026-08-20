@@ -14,7 +14,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Reports } from '../lib/store';
 import { Banner, SectionTitle } from '../components/ui';
-import { colors, radius, space, typography } from '../lib/theme';
+import { colors, heading, radius, space, typography } from '../lib/theme';
 import { formatDate, formatNumber, formatPercent, formatPeriod } from '../lib/format';
 
 interface Props {
@@ -126,7 +126,7 @@ export function StatsScreen({ reports, snapshotCount }: Props) {
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.base },
   content: { padding: space.lg, paddingBottom: space.xxl },
-  title: { color: colors.ink, fontSize: typography.scale.title, marginTop: space.sm },
+  title: { color: colors.ink, ...heading.title, marginTop: space.sm },
   explicacao: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 20 },
 
   chart: { marginTop: space.md, gap: space.sm },
@@ -149,7 +149,8 @@ const s = StyleSheet.create({
     backgroundColor: colors.gained,
     borderRadius: radius.pill,
   },
-  barValue: { color: colors.inkFaint, fontSize: typography.scale.micro, width: 44, textAlign: 'right' },
+  // `inkMuted`, e não `inkFaint`: é o número da barra, dado e não decoração.
+  barValue: { color: colors.inkMuted, fontSize: typography.scale.micro, width: 44, textAlign: 'right' },
   legenda: { color: colors.inkFaint, fontSize: typography.scale.micro, marginTop: space.sm },
 
   oldest: { marginTop: space.sm },
