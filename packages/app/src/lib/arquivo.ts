@@ -39,26 +39,36 @@
  * **fallback**, para o aparelho em que a abertura direta falhar, e só nesse
  * caso o arquivo copiado é apagado no fim.
  *
- * ## Abrir não é o mesmo que poder reposicionar (20/08/2026)
+ * ## O descritor que morre sozinho (20/08/2026)
  *
- * A primeira versão desse fallback testava só `open()`, e passou. O import
- * morria depois, na primeira leitura, com:
+ * Em dois aparelhos e duas versões seguidas, o import morreu na **primeira**
+ * leitura, sempre igual:
  *
  *     java.io.IOException: Bad file descriptor
  *       at sun.nio.ch.FileChannelImpl.position0
  *       at expo.modules.filesystem.FileSystemFileHandle.setOffset
  *
- * O motivo: nem todo `content://` vira um descritor de arquivo. Vários
- * provedores do Android (nuvem, Downloads de alguns aparelhos, MTP) entregam um
- * **cano** — bytes em ordem, do começo ao fim, sem `lseek`. Abrir funciona, ler
- * do começo funciona, e `handle.offset = n` estoura.
+ * O detalhe que decide o diagnóstico é qual erro é: `Bad file descriptor` é
+ * `EBADF` — descritor inválido ou já fechado. Um descritor que existe mas não
+ * aceita reposicionar dá `ESPIPE`/`Illegal seek`, que é outra frase. Ou seja:
+ * o problema não é o `content://` recusar `lseek`; é o descritor **já não estar
+ * mais lá** na hora em que o app foi usá-lo.
  *
- * Isso é fatal aqui e não em outro app qualquer porque o zip se lê **de trás
- * para frente**: o diretório central fica no fim do arquivo, então o primeiro
- * salto que o descompactador pede é justamente o que o cano não faz.
+ * Isso muda o que dá para fazer. Não existe teste prévio confiável: uma sondagem
+ * que abre, salta, lê e fecha passa — e foi o que a versão 0.2.1 fez, aprovando
+ * um arquivo que morreu na leitura seguinte. Pior: a sondagem fecha um descritor
+ * para o mesmo `content://` momentos antes da abertura definitiva, e é suspeita
+ * de ser ela própria parte da causa. Ela saiu.
  *
- * Por isso a sondagem agora reposiciona e lê nas duas pontas antes de decidir.
- * Quem não passa vai para a cópia, que é leitura sequencial e o cano aceita.
+ * O que sobrou é o que não depende de adivinhar: tenta ler no lugar; se a
+ * leitura falhar, **copia e refaz a mesma leitura na cópia**, sem perguntar
+ * nada a ninguém. A recuperação vale uma vez, em qualquer ponto do import, e
+ * termina sempre num `file://` dentro do cache do app — o único caso em que dá
+ * para garantir leitura por intervalo do começo ao fim.
+ *
+ * Custo do caminho rápido quando ele não serve: uma leitura de 4 bytes que
+ * falha. A primeira coisa que o descompactador pede é a assinatura do zip, no
+ * byte 0, então o desvio para a cópia acontece antes de qualquer trabalho.
  */
 
 import { Platform } from 'react-native';
@@ -138,6 +148,11 @@ async function escolherNoAparelho(aoPreparar?: () => void): Promise<FonteArquivo
   const escolhido = resultado.canceled ? undefined : resultado.assets?.[0];
   if (!escolhido) return null;
 
+  // Cópia de um import anterior que morreu no meio ficaria no cache para sempre,
+  // e ela tem o tamanho do export. Varrer aqui é o momento certo: o import que
+  // vem agora é o único que poderia precisar do espaço.
+  descartarCopiasVelhas();
+
   const original = new File(escolhido.uri);
 
   /*
@@ -145,22 +160,21 @@ async function escolherNoAparelho(aoPreparar?: () => void): Promise<FonteArquivo
    * onde o arquivo termina, o import roda em falso e falha no fim com uma
    * mensagem que não ajuda ninguém. Em `content://` o seletor às vezes não
    * informa o tamanho, daí a segunda tentativa pelo próprio arquivo — e, se nem
-   * assim vier, a cópia abaixo resolve, porque de um arquivo no cache o tamanho
-   * sempre se sabe.
+   * assim vier, a cópia resolve, porque de um arquivo no cache o tamanho sempre
+   * se sabe.
    */
   let arquivo = original;
   let tamanho = escolhido.size ?? original.size;
   let ehCopia = false;
 
-  if (!(tamanho > 0) || !aceitaLeituraPorIntervalo(original, tamanho)) {
+  if (!(tamanho > 0)) {
     aoPreparar?.();
     arquivo = await copiarParaOCache(original);
     ehCopia = true;
     tamanho = arquivo.size;
-
-    if (!(tamanho > 0) || !aceitaLeituraPorIntervalo(arquivo, tamanho)) {
+    if (!(tamanho > 0)) {
       descartarCopiaDoCache(arquivo);
-      throw new ArquivoIlegivel('nem depois de copiado o arquivo aceitou ser lido');
+      throw new ArquivoIlegivel('o sistema não informou o tamanho do arquivo');
     }
   }
 
@@ -169,70 +183,77 @@ async function escolherNoAparelho(aoPreparar?: () => void): Promise<FonteArquivo
    * syscall por 3 MB, e num export de 479 MB isso são ~160 aberturas
    * desnecessárias.
    */
-  let handle;
-  try {
-    handle = arquivo.open(FileMode.ReadOnly);
-  } catch (erro) {
-    if (ehCopia) descartarCopiaDoCache(arquivo);
-    throw new ArquivoIlegivel(mensagemDe(erro));
-  }
+  let handle = abrir(arquivo);
+
+  /** Lê de verdade. Separado porque a recuperação abaixo chama isto duas vezes. */
+  const lerDoHandle = (inicio: number, fim: number): Uint8Array => {
+    handle.offset = inicio;
+    return handle.readBytes(fim - inicio);
+  };
+
+  /**
+   * Troca o arquivo do usuário por uma cópia nossa, no meio do caminho.
+   *
+   * Depois disto tudo é `file://` dentro do cache do app, que é a única coisa
+   * que se pode garantir que lê por intervalo até o fim.
+   */
+  const passarParaACopia = async (): Promise<void> => {
+    aoPreparar?.();
+    try {
+      handle.close();
+    } catch {
+      // O descritor já estava ruim; é por isso que estamos aqui.
+    }
+    arquivo = await copiarParaOCache(original);
+    ehCopia = true;
+    handle = abrir(arquivo);
+  };
 
   return {
     nome: escolhido.name ?? 'export.zip',
     tamanho,
     async ler(inicio, fim) {
       try {
-        handle.offset = inicio;
-        return handle.readBytes(fim - inicio);
+        return lerDoHandle(inicio, fim);
       } catch (erro) {
+        // Já estamos na cópia: não há para onde recuar, e o erro é real.
+        // O prefixo diz ao painel em qual dos dois caminhos a leitura morreu —
+        // sem ele os dois relatos chegam com o mesmo texto do Java.
+        if (ehCopia) throw new ArquivoIlegivel(`na cópia: ${mensagemDe(erro)}`);
+
         /*
-         * A sondagem já provou que este arquivo reposiciona nas duas pontas, e
-         * mesmo assim: se falhar no meio, que falhe com nome e motivo. O erro
-         * cru daqui é um rastro de pilha do Java, e chegar ao usuário como
-         * "não deu para ler" apagaria a única pista que o painel receberia.
+         * Primeira falha lendo o arquivo no lugar dele. Em vez de desistir,
+         * copia e refaz **esta mesma leitura** — `ler` recebe o intervalo em
+         * cada chamada, então repetir do zero na cópia dá o mesmo resultado, e
+         * quem chamou nem fica sabendo.
          */
-        throw new ArquivoIlegivel(mensagemDe(erro));
+        await passarParaACopia();
+        try {
+          return lerDoHandle(inicio, fim);
+        } catch (erroDaCopia) {
+          descartarCopiaDoCache(arquivo);
+          throw new ArquivoIlegivel(`na cópia recém-feita: ${mensagemDe(erroDaCopia)}`);
+        }
       }
     },
     fechar() {
-      handle.close();
+      try {
+        handle.close();
+      } catch {
+        // Fechar um descritor que já morreu não é motivo para derrubar nada.
+      }
       // Só apaga o que foi este código que criou. O arquivo do usuário nunca.
       if (ehCopia) descartarCopiaDoCache(arquivo);
     },
   };
 }
 
-/**
- * O arquivo aceita ser lido por intervalo, e não só do começo ao fim?
- *
- * Duas leituras de um byte, e a segunda é a que importa: o descompactador
- * começa pelo fim do zip, onde mora o diretório central. Um descritor que só
- * entrega bytes em ordem passa na primeira e estoura na segunda — foi assim que
- * o `Bad file descriptor` chegou ao aparelho do dono. Ver o topo do arquivo.
- *
- * O custo é um descritor aberto por alguns microssegundos, contra os 479 MB de
- * cópia que a resposta errada aqui obrigaria a pagar.
- */
-function aceitaLeituraPorIntervalo(arquivo: File, tamanho: number): boolean {
-  let handle;
+/** Abre para leitura, traduzindo a falha do sistema em erro nosso. */
+function abrir(arquivo: File) {
   try {
-    handle = arquivo.open(FileMode.ReadOnly);
-  } catch {
-    return false;
-  }
-
-  try {
-    handle.offset = 0;
-    handle.readBytes(1);
-    if (tamanho > 1) {
-      handle.offset = tamanho - 1;
-      handle.readBytes(1);
-    }
-    return true;
-  } catch {
-    return false;
-  } finally {
-    handle.close();
+    return arquivo.open(FileMode.ReadOnly);
+  } catch (erro) {
+    throw new ArquivoIlegivel(mensagemDe(erro));
   }
 }
 
@@ -245,7 +266,7 @@ function aceitaLeituraPorIntervalo(arquivo: File, tamanho: number): boolean {
  * vez.
  */
 async function copiarParaOCache(original: File): Promise<File> {
-  const destino = new File(Paths.cache, `import-${Date.now()}.zip`);
+  const destino = new File(Paths.cache, `${PREFIXO_DA_COPIA}${Date.now()}.zip`);
   try {
     await original.copy(destino);
   } catch (erro) {
@@ -258,8 +279,28 @@ function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
+/** Prefixo das cópias que este arquivo cria. Serve para reconhecê-las depois. */
+const PREFIXO_DA_COPIA = 'import-';
+
 /**
- * Apaga a cópia de emergência feita por `abrirOuCopiar`.
+ * Apaga cópias que sobraram de imports anteriores.
+ *
+ * Uma cópia só é apagada em `fechar()`, e `fechar()` não roda se o app for
+ * fechado no meio do import. Cada sobra tem o tamanho do export — deixar isso
+ * acumular no cache é encher o aparelho do usuário sem ele saber por quê.
+ */
+function descartarCopiasVelhas(): void {
+  try {
+    for (const item of Paths.cache.list()) {
+      if (item instanceof File && item.name.startsWith(PREFIXO_DA_COPIA)) item.delete();
+    }
+  } catch {
+    // Limpeza é higiene, não requisito. Falhar aqui não pode impedir um import.
+  }
+}
+
+/**
+ * Apaga a cópia feita por `copiarParaOCache`.
  *
  * A verificação de caminho continua aqui como cinto e suspensório: um dia
  * alguém pode passar por engano o arquivo do próprio usuário, e apagá-lo

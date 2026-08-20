@@ -222,27 +222,37 @@ pedido do dono, que achou o resultado anterior "com cara de HTML sem estilo":
 Dependências nativas que entraram e **exigem build novo**: `expo-font`,
 `expo-linear-gradient` e `react-native-safe-area-context`.
 
-**O `content://` que abre mas não reposiciona (20/08/2026).** Segundo teste no
-Galaxy A51, com o APK 0.2.0: o import morria com
-`java.io.IOException: Bad file descriptor` em `FileChannelImpl.position0`,
-vindo de `FileSystemFileHandle.setOffset`.
+**O descritor de `content://` que morre sozinho (20/08/2026).** O import morria
+no Galaxy A51 com `java.io.IOException: Bad file descriptor` em
+`FileChannelImpl.position0`, vindo de `FileSystemFileHandle.setOffset` — na
+primeira leitura, que é a assinatura do zip no byte 0.
 
-A causa é que **nem todo `content://` do Android vira um descritor de arquivo**.
-Vários provedores (nuvem, Downloads de alguns aparelhos, MTP) entregam um cano:
-bytes em ordem, sem `lseek`. Abrir funciona; `handle.offset = n` estoura. Isso é
-fatal aqui e não num app qualquer porque **o zip se lê de trás para frente** — o
-diretório central fica no fim, então o primeiro salto que o descompactador pede é
-justamente o que o cano não faz.
+Foi diagnosticado **errado duas vezes** antes de acertar, e o registro fica aqui
+porque o erro de leitura é instrutivo:
 
-A sondagem de `lib/arquivo.ts` testava só `open()` e por isso aprovava o cano.
-Agora ela reposiciona e lê um byte **nas duas pontas** antes de decidir; quem não
-passa vai para a cópia, que é leitura sequencial e o cano aceita. A cópia virou
-`await original.copy()` em vez de `copySync` — meio gigabyte com a thread de JS
-travada não repinta nem o rótulo do botão — e ganhou fase própria no import
-(`preparando`), porque sem ela o caminho lento é indistinguível de travado.
+1. *"O `content://` não aceita `lseek`"* — falso. Isso daria `ESPIPE` /
+   `Illegal seek`. `Bad file descriptor` é `EBADF`: o descritor está inválido ou
+   **já fechado**. O problema não é a capacidade do arquivo, é o descritor não
+   estar mais lá na hora do uso.
+2. *"Então basta sondar antes"* — pior ainda. A sondagem da 0.2.1 abria,
+   saltava, lia e fechava; passava; e o arquivo morria na leitura seguinte. E ela
+   fecha um descritor para o mesmo `content://` momentos antes da abertura
+   definitiva, o que a torna suspeita de ser parte da causa. Ela saiu.
 
-Lição que vale além deste bug: **abrir não prova que dá para ler**. Sondagem de
-capacidade só vale se exercitar a capacidade que se vai usar.
+O conserto não tenta adivinhar: lê no lugar e, **se a leitura falhar, copia e
+refaz a mesma leitura na cópia**, transparente para quem chamou — `ler` recebe o
+intervalo em cada chamada, então repetir na cópia dá o mesmo resultado. Vale uma
+vez, em qualquer ponto do import, e termina sempre num `file://` no cache do app.
+Quando o caminho rápido não serve, o custo é uma leitura de 4 bytes que falha.
+
+A cópia é `await original.copy()` e não `copySync` — meio gigabyte com a thread
+de JS travada não repinta nem o rótulo do botão — e tem fase própria no import
+(`preparando`), sem a qual ela é indistinguível de travamento. Cópias de imports
+que morreram no meio são varridas do cache no import seguinte.
+
+Duas lições: **abrir não prova que dá para ler**, e **sondagem que não exercita a
+capacidade real só produz falso positivo**. Quando não dá para testar antes,
+recupere-se depois.
 
 **O painel de erros (20/08/2026).** O `/admin` guardava a pilha do crash desde
 sempre e nunca a mostrava — o dono teve de inspecionar o HTML para ler o erro
