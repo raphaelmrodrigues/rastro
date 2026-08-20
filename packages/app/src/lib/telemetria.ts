@@ -99,6 +99,23 @@ function limpar(texto: string, max: number): string {
 }
 
 /**
+ * Como `limpar`, mas preserva a quebra de linha.
+ *
+ * A pilha sem quebra de linha é uma frase de quatro mil caracteres que ninguém
+ * lê. O painel mostra a pilha dentro de um bloco de código, onde cada `at ...`
+ * na sua própria linha é o que a torna legível — juntar tudo era desperdiçar um
+ * dado que já estava sendo guardado.
+ */
+function limparPilha(texto: string, max: number): string {
+  return texto
+    .split('\n')
+    .map((linha) => linha.replace(/[ \t]+/g, ' ').trimEnd())
+    .join('\n')
+    .trim()
+    .slice(0, max);
+}
+
+/**
  * Relata um erro que derrubou uma tela.
  *
  * A mensagem é o único texto livre que sai do aparelho. É um risco aceito e
@@ -113,8 +130,13 @@ export function relatarErro(erro: unknown, tela?: string): void {
     appVersion: VERSAO_DO_APP,
     platform: plataforma(),
     name: limpar(e.name || 'Error', 120),
-    message: limpar(e.message || 'sem mensagem', 500),
-    ...(e.stack ? { stack: limpar(e.stack, 4000) } : {}),
+    /*
+     * Mil, e não os 500 de antes: no Android um erro vindo do módulo nativo traz
+     * o rastro de pilha do Java dentro da própria `message`, e meio kilobyte
+     * cortava exatamente a parte que dizia onde tinha estourado.
+     */
+    message: limpar(e.message || 'sem mensagem', 1000),
+    ...(e.stack ? { stack: limparPilha(e.stack, 4000) } : {}),
     ...(tela ? { screen: limpar(tela, 60) } : {}),
   });
 }

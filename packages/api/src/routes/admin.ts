@@ -74,6 +74,9 @@ function mascarar(email: string): string {
 
 const numero = (v: unknown): number => Number(v ?? 0);
 
+/** `array_agg` do Postgres vira array em JS; o painel só quer uma linha de texto. */
+const lista = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   /** A página em si. HTML estático; todos os dados vêm de /admin/metrics. */
   app.get('/', async (_req, reply) => {
@@ -164,16 +167,46 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       FROM app_reports WHERE kind = 'crash'
     `;
 
-    // `name`, `message` e `screen` moram dentro do JSONB `detail`, não são
-    // colunas — o schema guarda a forma do relato num campo só (ver migração 004).
-    const ultimosCrashes = await sql`
+    /*
+     * Os crashes vêm de duas formas porque servem a duas perguntas diferentes.
+     *
+     * Agrupados: "o que está quebrando", que é a pergunta de quem abre o painel
+     * para decidir o que consertar. Quinze linhas do mesmo erro repetido
+     * escondem o segundo erro, que aparece três vezes e derruba o import.
+     *
+     * Individuais: "o que exatamente aconteceu daquela vez", que é a pergunta de
+     * quem já escolheu o erro e precisa da pilha inteira para consertá-lo.
+     *
+     * `name`, `message`, `stack` e `screen` moram dentro do JSONB `detail`, não
+     * são colunas — o schema guarda a forma do relato num campo só (migração 004).
+     */
+    const gruposDeCrash = await sql`
       SELECT
         detail->>'name'    AS name,
         detail->>'message' AS message,
+        count(*)           AS n,
+        min(created_at)    AS primeiro,
+        max(created_at)    AS ultimo,
+        array_agg(DISTINCT coalesce(app_version, '?'))       AS versoes,
+        array_agg(DISTINCT coalesce(platform, '?'))          AS plataformas,
+        array_agg(DISTINCT coalesce(detail->>'screen', '?')) AS telas
+      FROM app_reports
+      WHERE kind = 'crash' AND created_at > now() - interval '30 days'
+      GROUP BY 1, 2
+      ORDER BY 3 DESC, 5 DESC
+      LIMIT 30
+    `;
+
+    const ultimosCrashes = await sql`
+      SELECT
+        id,
+        detail->>'name'    AS name,
+        detail->>'message' AS message,
+        detail->>'stack'   AS stack,
         detail->>'screen'  AS screen,
         app_version, platform, created_at
       FROM app_reports WHERE kind = 'crash'
-      ORDER BY created_at DESC LIMIT 15
+      ORDER BY created_at DESC LIMIT 40
     `;
 
     return {
@@ -206,9 +239,23 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       crashes: {
         total: numero(crashes?.total),
         ultimos7: numero(crashes?.ultimos7),
+        grupos: gruposDeCrash.map((g) => ({
+          name: g.name,
+          message: g.message,
+          n: numero(g.n),
+          primeiro: g.primeiro,
+          ultimo: g.ultimo,
+          versoes: lista(g.versoes),
+          plataformas: lista(g.plataformas),
+          telas: lista(g.telas),
+        })),
         recentes: ultimosCrashes.map((c) => ({
+          id: String(c.id),
           name: c.name,
           message: c.message,
+          // A pilha é o que faltava: ela já era guardada e o painel não mostrava,
+          // então o dono tinha o dado no banco e nenhum jeito de olhar para ele.
+          stack: c.stack,
           screen: c.screen,
           versao: c.app_version,
           plataforma: c.platform,

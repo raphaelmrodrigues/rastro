@@ -62,8 +62,14 @@ const crashSchema = z
      * trecho de dado do usuário. Sem ela, porém, um relato de crash não diz o
      * que aconteceu e a telemetria não serve para nada. O app já sanitiza antes
      * de mandar (ver lib/telemetria.ts).
+     *
+     * O limite era 500 e foi curto na primeira falha nativa de verdade: no
+     * Android, um erro que vem do módulo nativo traz o rastro de pilha do Java
+     * dentro da própria `message` (`Exception in HostFunction: ... at
+     * sun.nio.ch.FileChannelImpl.position0 ...`), e o corte caía no meio do que
+     * dizia onde o erro aconteceu.
      */
-    message: texto(500),
+    message: texto(1000),
     stack: texto(4000).optional(),
     screen: texto(60).optional(),
   })

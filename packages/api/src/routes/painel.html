@@ -35,7 +35,29 @@
   .barras{display:flex;align-items:flex-end;gap:3px;height:64px;background:var(--surface);border-radius:12px;padding:12px}
   .barra{flex:1;background:var(--dourado);border-radius:2px 2px 0 0;min-height:2px;opacity:.85}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dourado)}
-  .msg{color:var(--fraco);font-size:12px;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Mensagem de erro: quebra em ate 3 linhas em vez de sumir num "...". A
+     versao anterior cortava com ellipsis e escondia justamente o fim da frase,
+     que e onde o motivo costuma estar. */
+  .msg{color:var(--fraco);font-size:12px;max-width:520px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  h3{font-size:12px;color:var(--fraco);margin:20px 0 10px;font-weight:600}
+  .ocorrencia{background:var(--surface);border-radius:10px;margin-bottom:8px;overflow:hidden}
+  .ocorrencia>summary{cursor:pointer;padding:10px 14px;font-size:13px;list-style:none;display:flex;gap:10px;align-items:baseline}
+  .ocorrencia>summary::-webkit-details-marker{display:none}
+  .ocorrencia>summary::before{content:"▸";color:var(--tenue);font-size:11px}
+  .ocorrencia[open]>summary::before{content:"▾"}
+  .ocorrencia>summary .quando{color:var(--tenue);font-size:11px;margin-left:auto;white-space:nowrap}
+  .ocorrencia>summary .resumo{color:var(--fraco);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .corpo{padding:0 14px 14px}
+  .meta{color:var(--tenue);font-size:11px;margin-bottom:8px;display:flex;gap:14px;flex-wrap:wrap}
+  /* Selecionavel e com quebra: e daqui que o texto do erro sai para o editor.
+     Antes ele so existia no title= de uma celula, e so aparecia inspecionando
+     a pagina — que foi como o dono teve de ler o primeiro erro de verdade. */
+  pre{margin:0;background:var(--base);border:1px solid var(--linha);border-radius:8px;padding:12px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;color:var(--ink);
+      white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;user-select:text}
+  button.mini{width:auto;margin:8px 0 0;padding:6px 12px;font-size:12px;background:transparent;color:var(--fraco);border:1px solid var(--linha)}
+  button.mini:hover{color:var(--ink);border-color:var(--tenue)}
+  .acoes{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -52,6 +74,66 @@ const nf = new Intl.NumberFormat('pt-BR');
 const num = (n) => nf.format(n ?? 0);
 const dt = (v) => v ? new Date(v).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'}) : '—';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Ultimos numeros carregados. Existe para o botao de copiar ter de onde tirar o
+// texto sem reler o DOM — copiar do DOM traria a formatacao junto.
+let dados = null;
+
+/** "importar · android · 0.2.0" — plataforma e versao onde o erro aparece. */
+function resumoDeOnde(g) {
+  const partes = [g.telas, g.plataformas, g.versoes]
+    .map((l) => (l ?? []).filter((v) => v && v !== '?').join(', '))
+    .filter(Boolean);
+  return partes.join(' · ') || '—';
+}
+
+/**
+ * O erro em texto puro, do jeito que se cola num editor ou numa conversa.
+ *
+ * Tudo numa string so, com cabecalho: um rastro de pilha sem versao e sem tela
+ * ao lado obriga a voltar no painel para descobrir de onde ele veio.
+ */
+function textoDaOcorrencia(c) {
+  const cabecalho = [
+    `${c.name}: ${c.message}`,
+    '',
+    `quando:      ${dt(c.em)}`,
+    `versao:      ${c.versao ?? '—'}`,
+    `plataforma:  ${c.plataforma ?? '—'}`,
+    `tela:        ${c.screen ?? '—'}`,
+    `relato:      #${c.id}`,
+  ].join('\n');
+  return c.stack ? `${cabecalho}\n\n${c.stack}` : cabecalho;
+}
+
+/**
+ * Copia para a area de transferencia.
+ *
+ * O caminho de baixo existe porque `navigator.clipboard` so funciona em https
+ * (ou localhost), e um painel aberto por IP cairia fora dessa janela — sem o
+ * fallback, o botao nao faria nada e voltaria o problema de origem: nao dar
+ * para copiar o erro.
+ */
+function copiar(texto, botao) {
+  const feito = () => {
+    const antes = botao.textContent;
+    botao.textContent = 'Copiado';
+    setTimeout(() => { botao.textContent = antes; }, 1500);
+  };
+  const naMao = () => {
+    const campo = document.createElement('textarea');
+    campo.value = texto;
+    campo.style.position = 'fixed';
+    campo.style.opacity = '0';
+    document.body.appendChild(campo);
+    campo.select();
+    try { document.execCommand('copy'); feito(); } catch { botao.textContent = 'Selecione o texto acima'; }
+    campo.remove();
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(texto).then(feito, naMao);
+  } else naMao();
+}
 
 function telaDeLogin(aviso) {
   app.innerHTML = `
@@ -95,6 +177,7 @@ function tabela(colunas, linhas, vazio) {
 }
 
 function render(d) {
+  dados = d;
   const pico = Math.max(1, ...d.serieDeContas.map(p => p.n));
   const barras = d.serieDeContas.length
     ? `<div class="barras">${d.serieDeContas.map(p =>
@@ -161,15 +244,43 @@ function render(d) {
       {n:d.crashes.ultimos7, r:'em 7 dias', alerta:d.crashes.ultimos7>0},
       {n:d.crashes.total, r:'no total'},
     ])}
-    <div style="margin-top:12px">
+
+    <h3>O que está quebrando (30 dias)</h3>
     ${tabela(
-      [{t:'Erro'},{t:'Mensagem'},{t:'Tela'},{t:'Versão'},{t:'Quando'}],
-      d.crashes.recentes.map(c => [
-        `<code>${esc(c.name)}</code>`,
-        `<div class="msg" title="${esc(c.message)}">${esc(c.message)}</div>`,
-        esc(c.screen ?? '—'), esc(c.versao ?? '—'), dt(c.em)]),
-      'Nenhum erro registrado.')}
+      [{t:'Erro'},{t:'Mensagem'},{t:'Vezes',num:true},{t:'Onde'},{t:'Última'}],
+      (d.crashes.grupos ?? []).map(g => [
+        `<code>${esc(g.name)}</code>`,
+        `<div class="msg">${esc(g.message)}</div>`,
+        num(g.n),
+        `<div class="msg">${esc(resumoDeOnde(g))}</div>`,
+        dt(g.ultimo)]),
+      'Nenhum erro nos últimos 30 dias. É o estado saudável.')}
+
+    <h3>Ocorrências, uma a uma</h3>
+    <div class="acoes">
+      <button class="mini" data-copiar="tudo">Copiar todas</button>
+      <span class="sub" style="margin:0">Abra uma para ver a pilha inteira e copiar.</span>
     </div>
+    ${(d.crashes.recentes ?? []).length
+      ? d.crashes.recentes.map((c, i) => `
+        <details class="ocorrencia">
+          <summary>
+            <code>${esc(c.name)}</code>
+            <span class="resumo">${esc(c.message)}</span>
+            <span class="quando">${dt(c.em)}</span>
+          </summary>
+          <div class="corpo">
+            <div class="meta">
+              <span>versão ${esc(c.versao ?? '—')}</span>
+              <span>${esc(c.plataforma ?? '—')}</span>
+              <span>tela ${esc(c.screen ?? '—')}</span>
+              <span>#${esc(c.id)}</span>
+            </div>
+            <pre>${esc(textoDaOcorrencia(c))}</pre>
+            <button class="mini" data-copiar="${i}">Copiar este erro</button>
+          </div>
+        </details>`).join('')
+      : '<div class="vazio">Nenhum erro registrado.</div>'}
 
     <h2>Onde o app roda</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
@@ -193,6 +304,19 @@ function render(d) {
 
   $('recarregar').onclick = carregar;
   $('sair').onclick = () => { sessionStorage.removeItem(CHAVE); telaDeLogin(); };
+
+  // Delegado, e nao um onclick por botao: a pagina inteira e reescrita a cada
+  // atualizacao, e handlers presos aos elementos morreriam junto.
+  app.addEventListener('click', (ev) => {
+    const botao = ev.target.closest('[data-copiar]');
+    if (!botao) return;
+    const alvo = botao.dataset.copiar;
+    const lista = dados?.crashes?.recentes ?? [];
+    const texto = alvo === 'tudo'
+      ? lista.map(textoDaOcorrencia).join('\n\n' + '-'.repeat(60) + '\n\n')
+      : textoDaOcorrencia(lista[Number(alvo)]);
+    copiar(texto, botao);
+  });
 }
 
 async function carregar() {

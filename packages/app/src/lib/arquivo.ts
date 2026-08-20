@@ -38,6 +38,27 @@
  * Agora o `content://` é aberto direto. A cópia continua existindo como
  * **fallback**, para o aparelho em que a abertura direta falhar, e só nesse
  * caso o arquivo copiado é apagado no fim.
+ *
+ * ## Abrir não é o mesmo que poder reposicionar (20/08/2026)
+ *
+ * A primeira versão desse fallback testava só `open()`, e passou. O import
+ * morria depois, na primeira leitura, com:
+ *
+ *     java.io.IOException: Bad file descriptor
+ *       at sun.nio.ch.FileChannelImpl.position0
+ *       at expo.modules.filesystem.FileSystemFileHandle.setOffset
+ *
+ * O motivo: nem todo `content://` vira um descritor de arquivo. Vários
+ * provedores do Android (nuvem, Downloads de alguns aparelhos, MTP) entregam um
+ * **cano** — bytes em ordem, do começo ao fim, sem `lseek`. Abrir funciona, ler
+ * do começo funciona, e `handle.offset = n` estoura.
+ *
+ * Isso é fatal aqui e não em outro app qualquer porque o zip se lê **de trás
+ * para frente**: o diretório central fica no fim do arquivo, então o primeiro
+ * salto que o descompactador pede é justamente o que o cano não faz.
+ *
+ * Por isso a sondagem agora reposiciona e lê nas duas pontas antes de decidir.
+ * Quem não passa vai para a cópia, que é leitura sequencial e o cano aceita.
  */
 
 import { Platform } from 'react-native';
@@ -64,9 +85,18 @@ export class ArquivoIlegivel extends Error {
   }
 }
 
-/** Devolve null quando o usuário desiste da escolha. */
-export async function escolherArquivoDoExport(): Promise<FonteArquivo | null> {
-  return Platform.OS === 'web' ? escolherNoNavegador() : escolherNoAparelho();
+/**
+ * Devolve null quando o usuário desiste da escolha.
+ *
+ * `aoPreparar` avisa que o app teve de copiar o arquivo antes de conseguir lê-lo
+ * — o caminho lento, de minutos num export completo. Sem esse aviso a tela fica
+ * dizendo "abrindo seus arquivos" enquanto copia meio gigabyte, que é a mesma
+ * aparência de travado que este arquivo inteiro existe para evitar.
+ */
+export async function escolherArquivoDoExport(
+  aoPreparar?: () => void,
+): Promise<FonteArquivo | null> {
+  return Platform.OS === 'web' ? escolherNoNavegador() : escolherNoAparelho(aoPreparar);
 }
 
 async function escolherNoNavegador(): Promise<FonteArquivo | null> {
@@ -98,7 +128,7 @@ async function escolherNoNavegador(): Promise<FonteArquivo | null> {
   }
 }
 
-async function escolherNoAparelho(): Promise<FonteArquivo | null> {
+async function escolherNoAparelho(aoPreparar?: () => void): Promise<FonteArquivo | null> {
   const resultado = await DocumentPicker.getDocumentAsync({
     // O Instagram entrega .zip; alguns aparelhos reportam o mime genérico.
     type: ['application/zip', 'application/octet-stream', '*/*'],
@@ -109,7 +139,30 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
   if (!escolhido) return null;
 
   const original = new File(escolhido.uri);
-  const { arquivo, ehCopia } = abrirOuCopiar(original);
+
+  /*
+   * O tamanho é obrigatório: o descompactador lê por intervalo e, sem saber
+   * onde o arquivo termina, o import roda em falso e falha no fim com uma
+   * mensagem que não ajuda ninguém. Em `content://` o seletor às vezes não
+   * informa o tamanho, daí a segunda tentativa pelo próprio arquivo — e, se nem
+   * assim vier, a cópia abaixo resolve, porque de um arquivo no cache o tamanho
+   * sempre se sabe.
+   */
+  let arquivo = original;
+  let tamanho = escolhido.size ?? original.size;
+  let ehCopia = false;
+
+  if (!(tamanho > 0) || !aceitaLeituraPorIntervalo(original, tamanho)) {
+    aoPreparar?.();
+    arquivo = await copiarParaOCache(original);
+    ehCopia = true;
+    tamanho = arquivo.size;
+
+    if (!(tamanho > 0) || !aceitaLeituraPorIntervalo(arquivo, tamanho)) {
+      descartarCopiaDoCache(arquivo);
+      throw new ArquivoIlegivel('nem depois de copiado o arquivo aceitou ser lido');
+    }
+  }
 
   /*
    * Um handle só para o import inteiro: reabrir a cada bloco custaria uma
@@ -124,25 +177,22 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
     throw new ArquivoIlegivel(mensagemDe(erro));
   }
 
-  /*
-   * O tamanho é obrigatório: o descompactador lê por intervalo e, sem saber
-   * onde o arquivo termina, o import roda em falso e falha no fim com uma
-   * mensagem que não ajuda ninguém. Em `content://` o seletor às vezes não
-   * informa o tamanho, daí a segunda tentativa pelo próprio arquivo.
-   */
-  const tamanho = escolhido.size ?? arquivo.size;
-  if (!tamanho || tamanho <= 0) {
-    handle.close();
-    if (ehCopia) descartarCopiaDoCache(arquivo);
-    throw new ArquivoIlegivel('o sistema não informou o tamanho do arquivo');
-  }
-
   return {
     nome: escolhido.name ?? 'export.zip',
     tamanho,
     async ler(inicio, fim) {
-      handle.offset = inicio;
-      return handle.readBytes(fim - inicio);
+      try {
+        handle.offset = inicio;
+        return handle.readBytes(fim - inicio);
+      } catch (erro) {
+        /*
+         * A sondagem já provou que este arquivo reposiciona nas duas pontas, e
+         * mesmo assim: se falhar no meio, que falhe com nome e motivo. O erro
+         * cru daqui é um rastro de pilha do Java, e chegar ao usuário como
+         * "não deu para ler" apagaria a única pista que o painel receberia.
+         */
+        throw new ArquivoIlegivel(mensagemDe(erro));
+      }
     },
     fechar() {
       handle.close();
@@ -153,30 +203,55 @@ async function escolherNoAparelho(): Promise<FonteArquivo | null> {
 }
 
 /**
- * Devolve o arquivo que dá para abrir por intervalo.
+ * O arquivo aceita ser lido por intervalo, e não só do começo ao fim?
  *
- * O caminho normal é o próprio arquivo escolhido, sem cópia nenhuma. A cópia só
- * acontece se o aparelho recusar a abertura direta — e aí ela é o preço de o
- * import funcionar, não o padrão que todo mundo paga.
+ * Duas leituras de um byte, e a segunda é a que importa: o descompactador
+ * começa pelo fim do zip, onde mora o diretório central. Um descritor que só
+ * entrega bytes em ordem passa na primeira e estoura na segunda — foi assim que
+ * o `Bad file descriptor` chegou ao aparelho do dono. Ver o topo do arquivo.
+ *
+ * O custo é um descritor aberto por alguns microssegundos, contra os 479 MB de
+ * cópia que a resposta errada aqui obrigaria a pagar.
  */
-function abrirOuCopiar(original: File): { arquivo: File; ehCopia: boolean } {
+function aceitaLeituraPorIntervalo(arquivo: File, tamanho: number): boolean {
+  let handle;
   try {
-    // Abrir e fechar na hora é a única forma barata de saber se dá: o custo é
-    // um descritor por alguns microssegundos, contra 479 MB de cópia.
-    original.open(FileMode.ReadOnly).close();
-    return { arquivo: original, ehCopia: false };
+    handle = arquivo.open(FileMode.ReadOnly);
   } catch {
-    // Silêncio proposital: o erro que interessa é o da cópia, abaixo, ou o da
-    // abertura definitiva em quem chamou.
+    return false;
   }
 
+  try {
+    handle.offset = 0;
+    handle.readBytes(1);
+    if (tamanho > 1) {
+      handle.offset = tamanho - 1;
+      handle.readBytes(1);
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    handle.close();
+  }
+}
+
+/**
+ * Traz o arquivo para dentro do app, quando ler no lugar dele não dá.
+ *
+ * Assíncrona de propósito: `copySync` segura a thread de JavaScript do início ao
+ * fim, e meio gigabyte parado significa nem o rótulo do botão repintar. O
+ * usuário veria de novo a tela sem reação que o teste em aparelho já pegou uma
+ * vez.
+ */
+async function copiarParaOCache(original: File): Promise<File> {
   const destino = new File(Paths.cache, `import-${Date.now()}.zip`);
   try {
-    original.copySync(destino);
+    await original.copy(destino);
   } catch (erro) {
     throw new ArquivoIlegivel(mensagemDe(erro));
   }
-  return { arquivo: destino, ehCopia: true };
+  return destino;
 }
 
 function mensagemDe(erro: unknown): string {

@@ -222,6 +222,43 @@ pedido do dono, que achou o resultado anterior "com cara de HTML sem estilo":
 Dependências nativas que entraram e **exigem build novo**: `expo-font`,
 `expo-linear-gradient` e `react-native-safe-area-context`.
 
+**O `content://` que abre mas não reposiciona (20/08/2026).** Segundo teste no
+Galaxy A51, com o APK 0.2.0: o import morria com
+`java.io.IOException: Bad file descriptor` em `FileChannelImpl.position0`,
+vindo de `FileSystemFileHandle.setOffset`.
+
+A causa é que **nem todo `content://` do Android vira um descritor de arquivo**.
+Vários provedores (nuvem, Downloads de alguns aparelhos, MTP) entregam um cano:
+bytes em ordem, sem `lseek`. Abrir funciona; `handle.offset = n` estoura. Isso é
+fatal aqui e não num app qualquer porque **o zip se lê de trás para frente** — o
+diretório central fica no fim, então o primeiro salto que o descompactador pede é
+justamente o que o cano não faz.
+
+A sondagem de `lib/arquivo.ts` testava só `open()` e por isso aprovava o cano.
+Agora ela reposiciona e lê um byte **nas duas pontas** antes de decidir; quem não
+passa vai para a cópia, que é leitura sequencial e o cano aceita. A cópia virou
+`await original.copy()` em vez de `copySync` — meio gigabyte com a thread de JS
+travada não repinta nem o rótulo do botão — e ganhou fase própria no import
+(`preparando`), porque sem ela o caminho lento é indistinguível de travado.
+
+Lição que vale além deste bug: **abrir não prova que dá para ler**. Sondagem de
+capacidade só vale se exercitar a capacidade que se vai usar.
+
+**O painel de erros (20/08/2026).** O `/admin` guardava a pilha do crash desde
+sempre e nunca a mostrava — o dono teve de inspecionar o HTML para ler o erro
+acima, porque a mensagem vivia num `title=` cortado com reticências. Agora os
+crashes aparecem **agrupados** ("o que está quebrando", 30 dias) e **um a um**,
+cada um com a pilha inteira num bloco selecionável e um botão de copiar — com
+alternativa via `textarea` para quando o painel for aberto sem https, onde
+`navigator.clipboard` não existe.
+
+O teto da `message` subiu de 500 para 1000 caracteres: no Android o erro vindo do
+módulo nativo traz o rastro de pilha do Java **dentro da própria mensagem**, e
+500 cortava no meio do que dizia onde estourou. A `stack` deixou de ter as
+quebras de linha achatadas. Nada disso afrouxa a regra 5: o schema continua
+`.strict()`, o `detail` de `ParseWarning` continua fora, e o teste que trava isso
+continua no lugar.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 

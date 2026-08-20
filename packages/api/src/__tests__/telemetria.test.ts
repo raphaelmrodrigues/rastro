@@ -95,8 +95,14 @@ describe('corpoSchema — relato de erro', () => {
   });
 
   it('recusa mensagem e stack acima do limite', () => {
+    // 1000 é o teto da mensagem desde 20/08/2026: no Android o rastro de pilha
+    // do Java chega dentro dela, e 500 cortava no meio. Ver routes/telemetria.ts.
     assert.equal(
-      corpoSchema.safeParse({ ...crashValido, message: 'x'.repeat(501) }).success,
+      corpoSchema.safeParse({ ...crashValido, message: 'x'.repeat(1000) }).success,
+      true,
+    );
+    assert.equal(
+      corpoSchema.safeParse({ ...crashValido, message: 'x'.repeat(1001) }).success,
       false,
     );
     assert.equal(

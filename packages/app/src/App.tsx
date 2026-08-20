@@ -286,7 +286,9 @@ function App() {
 
     setFase('escolhendo');
     try {
-      const fonte = await escolherArquivoDoExport();
+      // O callback só dispara no caminho lento, quando o aparelho obriga a
+      // copiar o arquivo antes de conseguir lê-lo. Ver lib/arquivo.ts.
+      const fonte = await escolherArquivoDoExport(() => setFase('preparando'));
       if (!fonte) return;
 
       setFase('lendo');

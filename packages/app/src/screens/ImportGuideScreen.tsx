@@ -81,8 +81,14 @@ const PASSOS = [
   },
 ];
 
-/** Em que ponto do envio a tela está. Cada fase tem um texto próprio no botão. */
-export type FaseDoImport = 'parado' | 'escolhendo' | 'lendo';
+/**
+ * Em que ponto do envio a tela está. Cada fase tem um texto próprio no botão.
+ *
+ * `preparando` é o caminho lento: o aparelho não deixou ler o arquivo onde ele
+ * está e o app teve de copiá-lo para dentro primeiro. Num export completo isso
+ * leva minutos, e é a única fase que precisa se explicar em voz alta.
+ */
+export type FaseDoImport = 'parado' | 'escolhendo' | 'preparando' | 'lendo';
 
 interface Props {
   onPickFile: () => void;
@@ -122,11 +128,13 @@ export function ImportGuideScreen({
   const rotulo =
     fase === 'escolhendo'
       ? 'Abrindo seus arquivos…'
-      : fase === 'lendo'
-        ? progress && progress > 0.01
-          ? `Lendo… ${Math.round(progress * 100)}%`
-          : 'Lendo o arquivo…'
-        : 'Escolher arquivo';
+      : fase === 'preparando'
+        ? 'Preparando o arquivo…'
+        : fase === 'lendo'
+          ? progress && progress > 0.01
+            ? `Lendo… ${Math.round(progress * 100)}%`
+            : 'Lendo o arquivo…'
+          : 'Escolher arquivo';
 
   return (
     <View style={s.raiz}>
@@ -249,6 +257,18 @@ export function ImportGuideScreen({
           <View style={s.barra}>
             <Gradiente style={[s.barraCheia, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
+        ) : null}
+
+        {/*
+         * A cópia não tem porcentagem para mostrar — o sistema não reporta o
+         * avanço dela. Então ela ao menos diz que está viva e por quê: um botão
+         * girando por dois minutos sem explicação é indistinguível de travado.
+         */}
+        {fase === 'preparando' ? (
+          <Text style={s.aviso}>
+            Copiando para o app, porque este arquivo não pôde ser lido de onde está. Pode levar
+            alguns minutos.
+          </Text>
         ) : null}
       </View>
     </View>
@@ -402,5 +422,12 @@ const s = StyleSheet.create({
   },
 
   barra: { height: 4, borderRadius: radius.pill, backgroundColor: colors.surfaceRaised },
+  aviso: {
+    marginTop: space.sm,
+    color: colors.inkMuted,
+    fontSize: typography.scale.caption,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
   barraCheia: { height: 4, borderRadius: radius.pill },
 });
