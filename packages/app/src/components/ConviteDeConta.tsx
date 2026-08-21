@@ -77,7 +77,9 @@ const s = StyleSheet.create({
    * anúncio. A cor do convite mora onde ela convence, que é o botão.
    */
   caixa: {
-    backgroundColor: colors.base,
+    // Cartão elevado sobre o fundo. No escuro isso significa mais claro que
+    // `base`, nunca igual — ver a regra 2 no topo de `theme.ts`.
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,

@@ -26,6 +26,7 @@ import {
   Banner,
   Button,
   Gradiente,
+  Grupo,
   MenuRow,
   SectionTitle,
   StatCard,
@@ -193,14 +194,14 @@ export function DashboardScreen({
       )}
 
       <SectionTitle>Suas listas</SectionTitle>
-      <View style={s.lista}>
+      <Grupo>
         <MenuRow
-          label="Não te seguem de volta"
+          label="Você segue, eles não"
           value={formatNumber(insights.notFollowingYouBack.length)}
           onPress={() => onOpenList('nao-seguem-de-volta')}
         />
         <MenuRow
-          label="Você não segue de volta"
+          label="Te seguem, você não"
           value={formatNumber(insights.youDontFollowBack.length)}
           onPress={() => onOpenList('voce-nao-segue')}
         />
@@ -232,7 +233,7 @@ export function DashboardScreen({
           }
           onPress={onOpenAtividade}
         />
-      </View>
+      </Grupo>
 
       {diasDesdeImport >= DIAS_PARA_REIMPORTAR ? (
         <Banner
@@ -280,7 +281,6 @@ const s = StyleSheet.create({
 
   row: { flexDirection: 'row', gap: space.sm, marginBottom: space.sm },
   acoes: { gap: space.sm, marginTop: space.sm },
-  lista: { marginTop: space.xs },
   acaoBanner: { marginTop: space.sm },
   nota: {
     color: colors.inkFaint,

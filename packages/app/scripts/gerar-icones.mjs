@@ -27,17 +27,17 @@ const DESTINO = join(AQUI, '..', 'assets');
 // Mesmos valores de lib/theme.ts. Duplicados de propósito: este script roda em
 // Node e não pode importar um módulo que o Metro transforma.
 const COR = {
-  base: [0xff, 0xff, 0xff],
-  inkFaint: [0x7c, 0x82, 0x93],
-  inkMuted: [0x5e, 0x64, 0x74],
-  gained: [0x7b, 0x2f, 0xbe],
+  base: [0x0b, 0x0b, 0x10],
+  inkFaint: [0x6c, 0x6c, 0x82],
+  inkMuted: [0x9b, 0x9b, 0xb0],
+  gained: [0x8b, 0x5c, 0xf6],
 };
 
 /**
  * Paletas do desenho.
  *
- * `naTela` é a marca como ela aparece dentro do app: roxo sobre branco. Serve
- * ao splash, que fica sobre o mesmo branco.
+ * `naTela` é a marca como ela aparece dentro do app: roxo sobre o fundo escuro.
+ * Serve ao splash, que fica sobre esse mesmo fundo.
  *
  * `noRoxo` é a inversão, para o ícone do launcher e da loja. Um ícone branco com
  * traço cinza desaparece na gaveta de apps de qualquer aparelho de fundo claro —
@@ -280,17 +280,17 @@ mkdirSync(DESTINO, { recursive: true });
 
 const arquivos = [
   // Ícone da loja e do launcher: bloco roxo, o sistema arredonda por fora.
-  gerar('icon.png', 1024, { fundo: COR.gained, ocupacao: 0.62, paleta: PALETA.noRoxo }),
+  gerar('icon.png', 1024, { fundo: COR.base, ocupacao: 0.62, paleta: PALETA.naTela }),
   /*
    * Camada de frente do ícone adaptativo: transparente, com margem de recorte.
-   * O roxo de trás vem do `adaptiveIcon.backgroundColor` do app.json — os dois
+   * O fundo de trás vem do `adaptiveIcon.backgroundColor` do app.json — os dois
    * precisam continuar sendo a mesma cor, senão o ícone do Android fica com um
    * desenho claro sobre um fundo que não combina com o da loja.
    */
-  gerar('adaptive-icon.png', 1024, { fundo: null, ocupacao: 0.44, paleta: PALETA.noRoxo }),
+  gerar('adaptive-icon.png', 1024, { fundo: null, ocupacao: 0.44, paleta: PALETA.naTela }),
   // Splash: só a marca, sobre o branco definido em app.json.
   gerar('splash-icon.png', 1024, { fundo: null, ocupacao: 0.5 }),
-  gerar('favicon.png', 64, { fundo: COR.gained, ocupacao: 0.66, paleta: PALETA.noRoxo }),
+  gerar('favicon.png', 64, { fundo: COR.base, ocupacao: 0.66, paleta: PALETA.naTela }),
   /*
    * Ícone pequeno da notificação no Android.
    *

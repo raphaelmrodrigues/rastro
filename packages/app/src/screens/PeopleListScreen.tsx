@@ -62,13 +62,23 @@ export const TITULOS: Record<
     title: 'Novos seguidores',
     explicacao: 'Aqui a data é exata — o próprio Instagram registra quando cada pessoa te seguiu.',
   },
+  /*
+   * Os dois títulos eram "Não te seguem de volta" e "Você não segue de volta" —
+   * a mesma frase com as palavras trocadas de lugar. O dono confundiu as duas em
+   * 20/08/2026, e com razão: para saber qual é qual era preciso ler devagar. Os
+   * títulos agora dizem quem faz o quê, na ordem em que se pensa.
+   */
   'nao-seguem-de-volta': {
-    title: 'Não te seguem de volta',
-    explicacao: 'Você segue estas contas e elas não seguem você.',
+    title: 'Você segue, eles não',
+    explicacao:
+      'Você segue estas contas e elas não seguem você. É o retrato do dia em que o arquivo ' +
+      'foi gerado — quem deixou de te seguir depois disso ainda aparece.',
   },
   'voce-nao-segue': {
-    title: 'Você não segue de volta',
-    explicacao: 'Estas contas te seguem e você não segue de volta.',
+    title: 'Te seguem, você não',
+    explicacao:
+      'Estas contas te seguem e você não segue de volta. É o retrato do dia em que o arquivo ' +
+      'foi gerado — quem deixou de te seguir depois disso ainda aparece.',
   },
   mutuos: {
     title: 'Seguidores mútuos',

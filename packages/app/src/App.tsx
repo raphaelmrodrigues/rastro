@@ -145,10 +145,10 @@ function Raiz({ children }: { children: ReactNode }) {
        */}
       <SafeAreaView style={s.root} edges={['top', 'bottom', 'left', 'right']}>
         {/*
-          * Ícones escuros na barra de status: o app é de fundo branco, e
-          * `style="light"` desenharia relógio e bateria em branco sobre branco.
+          * Ícones claros na barra de status: o app é escuro desde 20/08/2026, e
+          * `style="dark"` desenharia relógio e bateria em preto sobre preto.
           */}
-        <StatusBar style="dark" />
+        <StatusBar style="light" />
         {children}
       </SafeAreaView>
     </View>

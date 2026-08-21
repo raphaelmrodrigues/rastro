@@ -308,6 +308,47 @@ tentado e desfeito no mesmo dia: ganhava 9 links e cada um seria palpite sobre
 nome de exibição. Onde não há @, a linha abre a **busca** do Instagram pelo nome.
 Detalhes e números em `docs/EXPORT-INSTAGRAM.md`.
 
+**Tema escuro (20/08/2026) — a identidade atual.** Terceira e definitiva virada,
+por decisão do dono, que achou o resultado claro "amador" e pediu referência em
+apps de sucesso. O que Spotify e Linear têm em comum não é a cor: é que **o fundo
+não compete**. Num fundo quase preto o número de seguidores é a coisa mais clara
+da tela e por isso a primeira que se lê; num fundo branco ele disputa com o
+próprio fundo, e a saída é engrossar a fonte — que foi o caminho das duas
+tentativas anteriores.
+
+As três regras estão escritas em `lib/theme.ts` e quebram fácil sem perceber:
+
+1. **A cor de acento é rara.** Roxo em ação, identidade e "chegou alguém". Um
+   quarto elemento roxo na mesma tela é hierarquia mal resolvida, não falta de cor.
+2. **Profundidade vem da superfície, não da sombra.** No escuro, sombra preta
+   sobre preto é invisível. Cartão é `surface` acima de `base`; a camada seguinte
+   é `surfaceRaised`. Três níveis bastam. Use `<Grupo>` (`components/ui.tsx`) para
+   agrupar linhas de menu — soltas sobre o fundo elas viram texto empilhado.
+3. **Branco puro não existe.** `ink` é branco esfriado; `#FFFFFF` vibra e cansa.
+
+Consequências que já mordem quem esquecer: `colors.gained` (`#8B5CF6`) serve como
+**texto** sobre o fundo, mas texto branco **por cima** dele reprova em contraste —
+para isso existe `gradients.marca`, deliberadamente mais escuro. Os tons de avatar
+são escuros com a inicial clara, e não pastéis. O `StatusBar` é `style="light"`.
+O `app.json` tem `userInterfaceStyle: "dark"` e todos os fundos em `#0B0B10`. As
+cores do gerador de ícones (`scripts/gerar-icones.mjs`) continuam duplicadas de
+propósito — ele roda em Node e não pode importar o tema; se mudar um, mude o outro.
+
+A fronteira com o Instagram não mudou e continua no topo do `theme.ts`: copiar a
+**estrutura** é gramática de app; copiar logotipo, nome ou o gradiente
+roxo-rosa-laranja é motivo de remoção das lojas.
+
+**Dado persistido de versão anterior (20/08/2026).** `atividade.json` e o índice
+de snapshots foram escritos pela versão do app que estava instalada naquele dia, e
+são lidos com o tipo de hoje. Um `as ActivityData` cego sobre esse JSON é mentira
+para o compilador que só aparece em produção — e apareceu: `lastMessages` entrou,
+o arquivo de quem já tinha importado não tinha o campo, e a tela de conversas
+quebrou inteira com "Cannot read property 'length' of undefined".
+
+A regra: **todo campo novo em dado persistido precisa de valor padrão em
+`storage.completar`**, e a tela ainda assim não confia (`?? []`). O arquivo do
+usuário só é reescrito no próximo import.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 

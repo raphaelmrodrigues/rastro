@@ -141,6 +141,39 @@ export async function salvarAjuste(chave: string, valor: string | null): Promise
  */
 const ARQUIVO_DE_ATIVIDADE = 'atividade.json';
 
+/**
+ * Completa o que faltar num `ActivityData` gravado por uma versão anterior.
+ *
+ * O arquivo no aparelho foi escrito pela versão do app que estava instalada
+ * naquele dia, e o app de hoje lê com o tipo de hoje. Um `as ActivityData` cego
+ * sobre esse JSON é uma mentira para o compilador que só aparece em produção —
+ * e apareceu: `lastMessages` entrou em 20/08/2026, o `atividade.json` de quem já
+ * tinha importado não tinha o campo, e a tela de conversas quebrou inteira com
+ * "Cannot read property 'length' of undefined".
+ *
+ * A regra que fica: **todo campo novo aqui precisa de valor padrão nesta
+ * função**, porque o arquivo do usuário nunca é reescrito até o próximo import.
+ */
+function completar(bruto: unknown): ActivityData | null {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const d = bruto as Partial<ActivityData>;
+  const lista = <T,>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
+
+  return {
+    builtAt: typeof d.builtAt === 'number' ? d.builtAt : 0,
+    self: typeof d.self === 'string' ? d.self : null,
+    conversations: lista(d.conversations).map((c) => ({
+      ...c,
+      // O campo que faltava. Sem ele a lista de conversas não abre.
+      lastMessages: lista(c.lastMessages),
+    })),
+    commentedOn: lista(d.commentedOn),
+    advertisers: lista(d.advertisers),
+    profileSearches: lista(d.profileSearches),
+    warnings: lista(d.warnings),
+  };
+}
+
 export async function readActivity(): Promise<ActivityData | null> {
   try {
     let raw: string | null;
@@ -150,7 +183,7 @@ export async function readActivity(): Promise<ActivityData | null> {
       const arquivo = new File(ensureRoot(), ARQUIVO_DE_ATIVIDADE);
       raw = arquivo.exists ? await arquivo.text() : null;
     }
-    return raw ? (JSON.parse(raw) as ActivityData) : null;
+    return raw ? completar(JSON.parse(raw)) : null;
   } catch {
     // Igual ao índice: dado corrompido não pode impedir o app de abrir.
     return null;

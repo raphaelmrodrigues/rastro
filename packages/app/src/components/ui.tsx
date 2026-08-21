@@ -80,7 +80,15 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
  * forma determinística: a mesma pessoa tem sempre a mesma cor, em qualquer tela
  * e em qualquer import, o que ajuda a reconhecer alguém ao correr a lista.
  */
-const TONS_AVATAR = ['#EADCF8', '#DDE7F6', '#F7E3D5', '#D8EDE6', '#F3DDEB', '#E4EAD6'] as const;
+/*
+ * Tons escuros, e a inicial por cima em `ink`.
+ *
+ * No tema claro estes eram pastéis, com a inicial escura em cima. Invertidos ao
+ * pé da letra no escuro, viravam seis círculos claros por tela — mais brilhantes
+ * que qualquer número, num tema cuja regra é o fundo não competir. Escuros, eles
+ * distinguem as pessoas sem gritar.
+ */
+const TONS_AVATAR = ['#332A4D', '#243247', '#46352A', '#22403A', '#40283C', '#333F24'] as const;
 
 /** Espessura do aro e o vão entre ele e o disco, em pixels. */
 const ESPESSURA_DO_ARO = 2.5;
@@ -334,6 +342,22 @@ export function PersonRow({
  * Linha de menu: rótulo à esquerda, valor e chevron à direita.
  * É o padrão de "Ajustes" das duas plataformas.
  */
+/**
+ * Cartão que agrupa linhas de menu.
+ *
+ * No tema claro as linhas se sustentavam soltas sobre o fundo: divisória cinza
+ * sobre branco basta para o olho ler "isto é um grupo". No escuro a divisória
+ * quase some, e seis linhas soltas viram texto empilhado sem começo nem fim.
+ * O cartão devolve a borda do grupo — a regra 2 do `theme.ts` aplicada a uma
+ * lista em vez de a um bloco.
+ *
+ * Um componente, e não um estilo copiado nas telas: este mesmo cartão aparece em
+ * quatro lugares, e estilo repetido à mão diverge no terceiro uso.
+ */
+export function Grupo({ children }: { children: ReactNode }) {
+  return <View style={s.grupo}>{children}</View>;
+}
+
 export function MenuRow({
   label,
   value,
@@ -467,7 +491,9 @@ const s = StyleSheet.create({
   statLabel: { color: colors.inkMuted, fontSize: typography.scale.caption },
 
   card: {
-    backgroundColor: colors.base,
+    // `surface`, e não `base`: no escuro um cartão da cor do fundo não é cartão,
+    // é um retângulo de borda solta. Ver a regra 2 no topo de `theme.ts`.
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -530,6 +556,15 @@ const s = StyleSheet.create({
   },
   badgeLabel: { color: colors.inkMuted, fontSize: typography.scale.micro },
 
+  grupo: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: space.md,
+    // Para a divisória da última linha não vazar pela borda arredondada.
+    overflow: 'hidden',
+  },
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',

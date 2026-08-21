@@ -12,7 +12,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Snapshot } from '@rastro/core';
 import type { Reports } from '../lib/store';
-import { MenuRow, SectionTitle } from '../components/ui';
+import { Grupo, MenuRow, SectionTitle } from '../components/ui';
 import { colors, space, typography } from '../lib/theme';
 import { formatNumber } from '../lib/format';
 import type { ListaId } from './DashboardScreen';
@@ -52,16 +52,18 @@ export function PessoasScreen({
       {diff ? (
         <>
           <SectionTitle>Desde a última atualização</SectionTitle>
-          <MenuRow
-            label="Deixaram de te seguir"
-            value={formatNumber(diff.lost.length)}
-            onPress={() => onOpenList('saíram')}
-          />
-          <MenuRow
-            label="Começaram a te seguir"
-            value={formatNumber(diff.gained.length)}
-            onPress={() => onOpenList('entraram')}
-          />
+          <Grupo>
+            <MenuRow
+              label="Deixaram de te seguir"
+              value={formatNumber(diff.lost.length)}
+              onPress={() => onOpenList('saíram')}
+            />
+            <MenuRow
+              label="Começaram a te seguir"
+              value={formatNumber(diff.gained.length)}
+              onPress={() => onOpenList('entraram')}
+            />
+          </Grupo>
         </>
       ) : (
         <View style={s.aviso}>
@@ -73,26 +75,28 @@ export function PessoasScreen({
       )}
 
       <SectionTitle>Sua rede hoje</SectionTitle>
-      <MenuRow
-        label="Não te seguem de volta"
-        value={formatNumber(insights.notFollowingYouBack.length)}
-        onPress={() => onOpenList('nao-seguem-de-volta')}
-      />
-      <MenuRow
-        label="Você não segue de volta"
-        value={formatNumber(insights.youDontFollowBack.length)}
-        onPress={() => onOpenList('voce-nao-segue')}
-      />
-      <MenuRow
-        label="Seguidores mútuos"
-        value={formatNumber(insights.mutuals.length)}
-        onPress={() => onOpenList('mutuos')}
-      />
-      <MenuRow
-        label="Solicitações que você enviou"
-        value={formatNumber(insights.pendingRequestsSent.length)}
-        onPress={() => onOpenList('pendentes')}
-      />
+      <Grupo>
+        <MenuRow
+          label="Você segue, eles não"
+          value={formatNumber(insights.notFollowingYouBack.length)}
+          onPress={() => onOpenList('nao-seguem-de-volta')}
+        />
+        <MenuRow
+          label="Te seguem, você não"
+          value={formatNumber(insights.youDontFollowBack.length)}
+          onPress={() => onOpenList('voce-nao-segue')}
+        />
+        <MenuRow
+          label="Seguidores mútuos"
+          value={formatNumber(insights.mutuals.length)}
+          onPress={() => onOpenList('mutuos')}
+        />
+        <MenuRow
+          label="Solicitações que você enviou"
+          value={formatNumber(insights.pendingRequestsSent.length)}
+          onPress={() => onOpenList('pendentes')}
+        />
+      </Grupo>
 
       {temListasDoInstagram ? (
         <>

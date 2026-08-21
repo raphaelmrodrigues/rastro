@@ -124,7 +124,15 @@ function toItems(lista: ListaDeAtividade, a: ActivityData): Item[] {
     chave: `${c.with}-${c.lastMessageAt}`,
     titulo: c.with,
     ...(c.username ? { username: c.username } : { buscar: c.with }),
-    ...(c.lastMessages.length > 0 ? { previa: c.lastMessages.map(previaDaMensagem) } : {}),
+    /*
+     * `?? []` e não `c.lastMessages.length`: quem importou antes de 20/08/2026
+     * tem um `atividade.json` sem este campo, e o acesso direto derrubava a tela
+     * inteira. O `completar` do storage já preenche, e isto é o cinto de
+     * segurança — dado que veio do disco nunca tem a forma que o tipo promete.
+     */
+    ...((c.lastMessages ?? []).length > 0
+      ? { previa: (c.lastMessages ?? []).map(previaDaMensagem) }
+      : {}),
     detalhe:
       c.lastMessageAt > 0
         ? `última mensagem ${formatRelative(c.lastMessageAt)} · ${formatDate(c.lastMessageAt)}`
@@ -192,6 +200,16 @@ export function AtividadeListaScreen({ lista, atividade }: Props) {
     );
   }, [items, busca]);
 
+  /*
+   * Verdadeiro quando há conversa mas nenhuma tem prévia — a assinatura de um
+   * `atividade.json` escrito antes de 20/08/2026. Só vale nas duas listas de
+   * conversa; nas outras não existe prévia nenhuma e o aviso seria mentira.
+   */
+  const precisaReimportar =
+    (lista === 'nao-respondidas' || lista === 'conversas') &&
+    atividade.conversations.length > 0 &&
+    atividade.conversations.every((c) => (c.lastMessages ?? []).length === 0);
+
   const abrir = (username: string) => {
     void abrirPerfil(username).then((ok) => setFalhouAoAbrir(!ok));
   };
@@ -239,6 +257,22 @@ export function AtividadeListaScreen({ lista, atividade }: Props) {
                 ? formatNumber(items.length)
                 : `${formatNumber(filtrados.length)} de ${formatNumber(items.length)}`}
             </Text>
+
+            {/*
+             * Arquivo antigo: as conversas existem, mas nenhuma tem prévia. Só
+             * o próximo import escreve o campo — sem esta linha a pessoa fica
+             * procurando um recurso que o app anunciou e que, no arquivo dela,
+             * ainda não existe.
+             */}
+            {precisaReimportar ? (
+              <Banner
+                title="Envie o arquivo de novo para ver as mensagens"
+                body={
+                  'Suas conversas foram lidas por uma versão anterior do app, que não guardava ' +
+                  'o trecho das mensagens. O próximo import já traz.'
+                }
+              />
+            ) : null}
 
             {falhouAoAbrir ? (
               <Banner
