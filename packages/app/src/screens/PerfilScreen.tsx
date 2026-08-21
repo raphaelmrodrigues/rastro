@@ -264,6 +264,22 @@ function EstadoDoEnvio({
     );
   }
 
+  /*
+   * Restauração: o caminho de volta da conta. Vale uma frase própria porque é a
+   * única vez em que o app traz dado de fora para dentro, e quem acabou de
+   * instalar num aparelho novo precisa entender por que o histórico apareceu
+   * sem ter enviado nada.
+   */
+  if (envio.situacao === 'restaurado') {
+    return (
+      <Text style={s.estadoTexto}>
+        {envio.quantos === 1
+          ? '1 atualização veio da sua conta.'
+          : `${envio.quantos} atualizações vieram da sua conta.`}
+      </Text>
+    );
+  }
+
   return (
     <Banner
       title="Ainda não conseguimos salvar"

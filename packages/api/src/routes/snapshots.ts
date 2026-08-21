@@ -272,6 +272,24 @@ export const snapshotRoutes: FastifyPluginAsync = async (app) => {
     return { snapshots: await listSnapshots(profileId) };
   });
 
+  /**
+   * GET /profiles/:profileId/snapshots/:snapshotId/raw — o snapshot inteiro.
+   *
+   * Existe para **restaurar** o app num aparelho novo, e é por isso que devolve
+   * o objeto cru em vez dos derivados: o app calcula insights e diffs
+   * localmente, e precisa das listas para continuar comparando com os imports
+   * que vierem depois. Entregar só `insights` deixaria a pessoa com um retrato
+   * bonito e sem futuro — o próximo arquivo não teria com o que ser comparado.
+   *
+   * Tem que vir antes da rota `/:snapshotId`, senão o Fastify casa "raw" como id.
+   */
+  app.get('/:snapshotId/raw', async (req, reply) => {
+    const { snapshotId } = req.params as ProfileParams & { snapshotId: string };
+    const snapshot = await loadSnapshot(snapshotId);
+    if (!snapshot) return reply.code(404).send({ error: 'Snapshot não encontrado.' });
+    return { snapshot };
+  });
+
   /** GET /profiles/:profileId/snapshots/:snapshotId — listas de um snapshot. */
   app.get('/:snapshotId', async (req, reply) => {
     const { snapshotId } = req.params as ProfileParams & { snapshotId: string };

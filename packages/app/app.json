@@ -2,7 +2,7 @@
   "expo": {
     "name": "Rastro",
     "slug": "rastro",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "description": "Acompanhe quem entrou e quem saiu da sua lista de seguidores, usando o export oficial de dados do Instagram. Nao pedimos sua senha.",

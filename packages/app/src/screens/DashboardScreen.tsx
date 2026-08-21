@@ -70,6 +70,23 @@ interface Props {
    */
   convite?: ReactNode;
   /**
+   * Fila de faxina em andamento: quantas contas faltam e como voltar para ela.
+   *
+   * O painel é o único lugar em que a pessoa passa sempre. Sem este atalho, uma
+   * fila interrompida vira dado órfão: continua no disco, some da vista, e a
+   * pessoa remarca tudo de novo achando que perdeu.
+   */
+  fila?: { restantes: number; titulo: string; onAbrir: () => void };
+  /**
+   * O zip que acabou de ser lido, para lembrar a pessoa de que pode apagá-lo.
+   *
+   * O export completo passa de 400 MB e fica na pasta de downloads ocupando
+   * espaço para sempre — ninguém apaga o que não sabe que pode apagar. E dá para
+   * afirmar com segurança: o import copia o que precisa para o snapshot e fecha
+   * o arquivo; nada no app volta a lê-lo depois.
+   */
+  arquivoParaApagar?: { nome: string; onDispensar: () => void };
+  /**
    * Quantas conversas esperam resposta, ou `null` quando o usuário ainda não
    * mandou o export completo — que é o caso da maioria, já que o onboarding
    * pede o arquivo rápido.
@@ -90,6 +107,8 @@ export function DashboardScreen({
   onOpenAtividade,
   conversasPendentes,
   convite,
+  fila,
+  arquivoParaApagar,
 }: Props) {
   const { insights, diff } = reports;
   const diasDesdeImport = Math.floor((Date.now() - snapshot.importedAt) / 86_400_000);
@@ -193,15 +212,35 @@ export function DashboardScreen({
         />
       )}
 
+      {arquivoParaApagar ? (
+        <Banner
+          title="Pode apagar o arquivo do celular"
+          body={
+            `O Rastro já leu tudo o que precisava de "${arquivoParaApagar.nome}" e não vai ` +
+            'abrir esse arquivo de novo. Ele costuma ficar em Downloads e ocupa bastante ' +
+            'espaço — apagar não afeta em nada o que você já vê aqui.'
+          }
+          action={<Button label="Entendi" onPress={arquivoParaApagar.onDispensar} />}
+        />
+      ) : null}
+
+      {fila && fila.restantes > 0 ? (
+        <Banner
+          title={`${fila.titulo}: ${fila.restantes} ${fila.restantes === 1 ? 'conta' : 'contas'} na fila`}
+          body="Você marcou estas contas para resolver e parou no meio. Dá para continuar de onde parou."
+          action={<Button label="Continuar" onPress={fila.onAbrir} />}
+        />
+      ) : null}
+
       <SectionTitle>Suas listas</SectionTitle>
       <Grupo>
         <MenuRow
-          label="Você segue, eles não"
+          label="Não te seguem de volta"
           value={formatNumber(insights.notFollowingYouBack.length)}
           onPress={() => onOpenList('nao-seguem-de-volta')}
         />
         <MenuRow
-          label="Te seguem, você não"
+          label="Você não segue de volta"
           value={formatNumber(insights.youDontFollowBack.length)}
           onPress={() => onOpenList('voce-nao-segue')}
         />

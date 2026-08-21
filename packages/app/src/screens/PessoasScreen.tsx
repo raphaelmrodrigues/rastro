@@ -77,12 +77,12 @@ export function PessoasScreen({
       <SectionTitle>Sua rede hoje</SectionTitle>
       <Grupo>
         <MenuRow
-          label="Você segue, eles não"
+          label="Não te seguem de volta"
           value={formatNumber(insights.notFollowingYouBack.length)}
           onPress={() => onOpenList('nao-seguem-de-volta')}
         />
         <MenuRow
-          label="Te seguem, você não"
+          label="Você não segue de volta"
           value={formatNumber(insights.youDontFollowBack.length)}
           onPress={() => onOpenList('voce-nao-segue')}
         />

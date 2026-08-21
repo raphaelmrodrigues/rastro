@@ -267,6 +267,25 @@ export function Banner({
  * @ fica na cor normal de propósito, porque âmbar aqui significaria "entrou
  * alguém" e a lista de quem saiu ficaria pintada de boas-vindas.
  */
+/**
+ * Caixa de seleção.
+ *
+ * Desenhada à mão, e não com uma biblioteca: são doze linhas, e trazer uma
+ * dependência nativa para isto significaria mais um build só para mudar a cor da
+ * marca de seleção.
+ *
+ * O quadrado vazio tem borda visível de propósito — no escuro, um contorno em
+ * `hairline` desaparece, e uma lista de checkboxes invisíveis parece uma lista
+ * comum que não responde ao toque.
+ */
+export function Checkbox({ marcado }: { marcado: boolean }) {
+  return (
+    <View style={[s.checkbox, marcado && s.checkboxMarcado]}>
+      {marcado ? <Text style={s.checkboxMarca}>✓</Text> : null}
+    </View>
+  );
+}
+
 export function PersonRow({
   username,
   displayName,
@@ -285,6 +304,14 @@ export function PersonRow({
   comoArroba = true,
   /** Aro em gradiente no avatar. Reservado a quem entrou desde o arquivo anterior. */
   destaque,
+  /**
+   * Quando definido, a linha entra em modo seleção: mostra a caixa e o toque
+   * passa a marcar em vez de abrir o perfil.
+   *
+   * `undefined` e `false` são coisas diferentes aqui — `undefined` é "esta lista
+   * não tem seleção", `false` é "tem, e esta linha está desmarcada".
+   */
+  selecionado,
 }: {
   username: string;
   displayName?: string;
@@ -295,11 +322,13 @@ export function PersonRow({
   onPress?: () => void;
   comoArroba?: boolean;
   destaque?: boolean;
+  selecionado?: boolean;
 }) {
   const rotulo = comoArroba ? `@${username}` : username;
 
   const conteudo = (pressionado: boolean) => (
     <View style={[s.person, pressionado && s.personPressed]}>
+      {selecionado === undefined ? null : <Checkbox marcado={selecionado} />}
       <Avatar username={username} anel={destaque} />
       <View style={s.personText}>
         <Text style={s.personHandle} numberOfLines={1}>
@@ -555,6 +584,18 @@ const s = StyleSheet.create({
     marginTop: 3,
   },
   badgeLabel: { color: colors.inkMuted, fontSize: typography.scale.micro },
+
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxMarcado: { backgroundColor: colors.gained, borderColor: colors.gained },
+  checkboxMarca: { color: '#FFFFFF', fontSize: 13, fontWeight: typography.weight.bold },
 
   grupo: {
     backgroundColor: colors.surface,

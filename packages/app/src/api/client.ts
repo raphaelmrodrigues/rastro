@@ -16,6 +16,7 @@
 
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import type { Snapshot } from '@rastro/core';
 import { apagarRefreshToken, guardarRefreshToken, lerRefreshToken } from './tokens';
 
 /**
@@ -435,6 +436,36 @@ export async function listarImports(profileId: string): Promise<ImportRemoto[]> 
     `/profiles/${profileId}/snapshots/imports`,
   );
   return imports;
+}
+
+/** Uma linha do histórico remoto. O suficiente para saber o que falta baixar. */
+export interface SnapshotRemoto {
+  id: string;
+  importedAt: string;
+  followerCount: number;
+  followingCount: number;
+}
+
+export async function listarSnapshotsRemotos(profileId: string): Promise<SnapshotRemoto[]> {
+  const { snapshots } = await autenticado<{ snapshots: SnapshotRemoto[] }>(
+    `/profiles/${profileId}/snapshots`,
+  );
+  return snapshots;
+}
+
+/**
+ * Baixa um snapshot inteiro, com as listas.
+ *
+ * O par desta função é `enviarSnapshot`. Sem ela a conta era backup só de ida: os
+ * arquivos subiam e nada descia, então "troque de aparelho sem perder nada" —
+ * que o app promete no convite e no Perfil — não acontecia. O servidor sempre
+ * teve o dado; faltava alguém pedir.
+ */
+export async function baixarSnapshot(profileId: string, snapshotId: string): Promise<Snapshot> {
+  const { snapshot } = await autenticado<{ snapshot: Snapshot }>(
+    `/profiles/${profileId}/snapshots/${snapshotId}/raw`,
+  );
+  return snapshot;
 }
 
 export interface AparelhoConectado {

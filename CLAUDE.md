@@ -349,6 +349,52 @@ A regra: **todo campo novo em dado persistido precisa de valor padrão em
 `storage.completar`**, e a tela ainda assim não confia (`?? []`). O arquivo do
 usuário só é reescrito no próximo import.
 
+**A fila de faxina, e o pedido que foi recusado (21/08/2026).** O dono pediu um
+botão de **deixar de seguir em massa**: marcar contas com checkbox e o app
+executar tudo. A resposta foi não, e o motivo precisa ficar registrado porque o
+pedido vai voltar:
+
+- A **API oficial da Meta não tem endpoint de unfollow**. Os escopos liberados
+  para terceiros são de leitura, e sempre foram.
+- A única via técnica é login programático e API privada — regras 1 e 2. O
+  Instagram detecta unfollow em lote vindo de fora e **bane a conta do usuário**,
+  não a nossa.
+- Automação de conta é remoção certa nas duas lojas — regra 4, que cita este
+  caso com todas as letras.
+- E seria incoerente: o argumento de venda do app é não pedir a senha do
+  Instagram, e isso exigiria pedir exatamente ela.
+
+O que existe no lugar é `lib/fila.ts` + `screens/FilaScreen.tsx`: o usuário marca
+quem quer resolver, o app guarda a lista e **abre um perfil por vez**. Ele age
+dentro do Instagram e volta; o app marca e abre o próximo. Vale para três listas
+(`acaoDaLista`): não te seguem de volta → deixar de seguir; você não segue de
+volta → seguir; solicitações pendentes → cancelar.
+
+Duas propriedades que não podem se perder: **o app não sabe se a pessoa fez** —
+`feitos` é declaração dela, e por isso todo texto é em primeira pessoa ("Deixei
+de seguir"), nunca "pronto, deixamos de seguir". E os botões de desfecho só
+aparecem **depois** de o perfil ter sido aberto, senão a fila vira um contador
+que se zera sozinho.
+
+**O backup deixou de ser só de ida (21/08/2026).** Desde que a conta existe, o
+app **subia** snapshots e nunca baixava: quem trocasse de celular, entrasse na
+conta e abrisse o app via "envie seu primeiro arquivo", com o histórico inteiro
+parado no servidor. As rotas de leitura já existiam; faltava alguém chamá-las —
+e era justamente a promessa que o convite de conta faz.
+
+Agora há `GET /profiles/:id/snapshots/:id/raw` (o snapshot **cru**, não os
+derivados: o app calcula insights e diffs localmente e precisa das listas para
+comparar com os imports futuros) e `restaurarDoServidor()` em `lib/conta.ts`, que
+baixa por diferença ao entrar. Restaurar roda **antes** de enviar: num aparelho
+novo não há o que enviar, e é exatamente esse o caso que precisa do histórico.
+
+**O zip pode ser apagado depois do import**, e o app agora diz isso. Verificado:
+`extrairDoZip` chama `fonte.fechar()` no fim e nada guarda a fonte — o arquivo
+não é lido de novo nunca. Como o export completo passa de 400 MB, avisar economiza
+espaço real. O aviso mostra só o **nome** do arquivo: um `content://` do Android
+não tem caminho de sistema que se possa exibir, e inventar um mandaria a pessoa
+procurar onde não está.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 

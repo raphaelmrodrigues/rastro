@@ -16,7 +16,13 @@
 
 import { create } from 'zustand';
 import type { Snapshot } from '@rastro/core';
-import { lerAjuste, loadSnapshot as loadSnapshotLocal, readIndex, salvarAjuste } from './storage';
+import {
+  lerAjuste,
+  loadSnapshot as loadSnapshotLocal,
+  readIndex,
+  salvarAjuste,
+  saveSnapshot,
+} from './storage';
 import { esquecerLembretes } from './notificacoes';
 import {
   cadastrar as apiCadastrar,
@@ -25,7 +31,9 @@ import {
   enviarSnapshot,
   ErroDeApi,
   excluirConta as apiExcluirConta,
+  baixarSnapshot,
   listarPerfis,
+  listarSnapshotsRemotos,
   PrecisaAtualizar,
   quandoPerderSessao,
   quandoPrecisarAtualizar,
@@ -77,6 +85,8 @@ export type EstadoDeEnvio =
   | { situacao: 'ocioso' }
   | { situacao: 'enviando' }
   | { situacao: 'enviado'; duplicado: boolean; em: number }
+  /** Veio do servidor para este aparelho. `quantos` é o que faltava aqui. */
+  | { situacao: 'restaurado'; quantos: number; em: number }
   | { situacao: 'pendente'; motivo: string };
 
 interface ContaState {
@@ -101,6 +111,8 @@ interface ContaState {
   sincronizar: (snapshot: Snapshot) => Promise<void>;
   /** Reenvia o import mais recente se ele ainda não subiu. Idempotente. */
   enviarPendente: () => Promise<void>;
+  /** Traz do servidor os snapshots que faltam neste aparelho. */
+  restaurarDoServidor: () => Promise<void>;
   limparErro: () => void;
 }
 
@@ -141,9 +153,17 @@ export const useConta = create<ContaState>((set, get) => ({
 
     set({ conectado: true, userId: usuarioAtual() });
     await carregarPerfil(set);
-    // Retoma o que ficou para trás numa falha de rede anterior. Sem `await`:
-    // a abertura do app não espera a rede.
-    void get().enviarPendente();
+    /*
+     * Restaurar vem antes de enviar, e a ordem importa: num aparelho novo não há
+     * nada para enviar, e é exatamente esse o caso em que a pessoa precisa do
+     * histórico de volta. Fazer o contrário atrasaria a única coisa que ela
+     * está esperando ver.
+     *
+     * Sem `await` nos dois: a abertura do app não espera a rede.
+     */
+    void get()
+      .restaurarDoServidor()
+      .then(() => get().enviarPendente());
   },
 
   async cadastrar(email, senha) {
@@ -230,8 +250,11 @@ export const useConta = create<ContaState>((set, get) => ({
       await salvarPerfil(perfil.id);
       set({ ocupado: false, perfil });
       // Quem já usava o app no modo local acabou de ganhar um destino para os
-      // imports que ele fez antes de criar conta.
-      void get().enviarPendente();
+      // imports que ele fez antes de criar conta. E quem está reinstalando num
+      // aparelho novo acabou de ganhar o histórico de volta.
+      void get()
+        .restaurarDoServidor()
+        .then(() => get().enviarPendente());
       return true;
     } catch (erro) {
       set({ ocupado: false, erro: mensagemDe(erro) });
@@ -262,6 +285,59 @@ export const useConta = create<ContaState>((set, get) => ({
       // O snapshot já está salvo no aparelho. Falha aqui é adiamento, não perda —
       // e a mensagem precisa dizer isso, senão o usuário acha que perdeu o import.
       set({ envio: { situacao: 'pendente', motivo: mensagemDe(erro) } });
+    }
+  },
+
+  /**
+   * Traz do servidor o que este aparelho não tem.
+   *
+   * O par de `enviarPendente`, e o conserto de um buraco que estava de pé desde
+   * que a conta existe: o app **subia** os snapshots e nunca baixava. Na prática,
+   * quem trocasse de celular, entrasse na conta e abrisse o app via "envie seu
+   * primeiro arquivo" — com o histórico inteiro parado no servidor. A conta era
+   * backup só de ida, e é justamente ela que o app oferece como motivo para
+   * criar cadastro.
+   *
+   * Baixa por diferença, não tudo sempre: o que já está no aparelho fica como
+   * está. E nunca sobrescreve — um snapshot já é imutável por definição.
+   *
+   * Falhar aqui é silencioso de propósito. O app funciona inteiro offline; uma
+   * restauração que não completou hoje completa na próxima abertura, e um erro
+   * de rede na tela de entrada só assustaria.
+   */
+  async restaurarDoServidor() {
+    const { conectado, perfil } = get();
+    if (!conectado || !perfil || !temSessao()) return;
+
+    try {
+      const remotos = await listarSnapshotsRemotos(perfil.id);
+      if (remotos.length === 0) return;
+
+      const locais = new Set((await readIndex()).map((i) => i.id));
+      const faltando = remotos.filter((r) => !locais.has(r.id));
+      if (faltando.length === 0) return;
+
+      set({ envio: { situacao: 'enviando' } });
+
+      /*
+       * Do mais recente para o mais antigo: se a pessoa fechar o app no meio da
+       * restauração, o que ela já tem é o que mais importa — o último import e o
+       * anterior, que juntos já produzem o diff da tela principal.
+       */
+      const ordenados = [...faltando].sort(
+        (a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime(),
+      );
+
+      let trazidos = 0;
+      for (const remoto of ordenados) {
+        const snapshot = await baixarSnapshot(perfil.id, remoto.id);
+        await saveSnapshot(snapshot);
+        trazidos += 1;
+      }
+
+      set({ envio: { situacao: 'restaurado', quantos: trazidos, em: Date.now() } });
+    } catch {
+      set({ envio: { situacao: 'ocioso' } });
     }
   },
 

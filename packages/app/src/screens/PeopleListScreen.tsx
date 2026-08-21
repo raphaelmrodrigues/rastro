@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   hasKnownDate,
   type Account,
@@ -16,11 +16,12 @@ import {
   type SnapshotDiff,
   type SnapshotInsights,
 } from '@rastro/core';
-import { Banner, EmptyState, PersonRow } from '../components/ui';
+import { Banner, Button, EmptyState, PersonRow } from '../components/ui';
 import { IconeBusca } from '../components/icons';
 import { colors, radius, space, typography } from '../lib/theme';
 import { describeEvent, formatDate, formatRelative } from '../lib/format';
 import { abrirPerfil } from '../lib/perfil';
+import { acaoDaLista, TEXTO_DA_ACAO } from '../lib/fila';
 import type { ListaId } from './DashboardScreen';
 
 interface Item {
@@ -37,6 +38,14 @@ interface Props {
   diff: SnapshotDiff | null;
   /** As listas que o usuário mantém no Instagram vêm daqui, cruas do export. */
   snapshot: Snapshot;
+  /**
+   * Abre a fila com as contas escolhidas.
+   *
+   * Só existe nas três listas em que há ação a tomar (ver `acaoDaLista`). A tela
+   * não monta a fila: ela devolve os @ marcados e quem decide o que fazer com
+   * eles é a raiz do app, que é quem sabe navegar.
+   */
+  onIniciarFila?: (usernames: string[]) => void;
 }
 
 /**
@@ -63,19 +72,21 @@ export const TITULOS: Record<
     explicacao: 'Aqui a data é exata — o próprio Instagram registra quando cada pessoa te seguiu.',
   },
   /*
-   * Os dois títulos eram "Não te seguem de volta" e "Você não segue de volta" —
-   * a mesma frase com as palavras trocadas de lugar. O dono confundiu as duas em
-   * 20/08/2026, e com razão: para saber qual é qual era preciso ler devagar. Os
-   * títulos agora dizem quem faz o quê, na ordem em que se pensa.
+   * Estes dois títulos já foram "Você segue, eles não" e "Te seguem, você não",
+   * por meio dia, na tentativa de desfazer uma confusão entre as duas listas. O
+   * dono desfez a mudança: a forma telegráfica economiza uma leitura e cobra
+   * outra, porque "eles" e "você" sem verbo obrigam a montar a frase na cabeça.
+   * O que resolvia a confusão não era o título — era a explicação embaixo dele,
+   * que ficou.
    */
   'nao-seguem-de-volta': {
-    title: 'Você segue, eles não',
+    title: 'Não te seguem de volta',
     explicacao:
       'Você segue estas contas e elas não seguem você. É o retrato do dia em que o arquivo ' +
       'foi gerado — quem deixou de te seguir depois disso ainda aparece.',
   },
   'voce-nao-segue': {
-    title: 'Te seguem, você não',
+    title: 'Você não segue de volta',
     explicacao:
       'Estas contas te seguem e você não segue de volta. É o retrato do dia em que o arquivo ' +
       'foi gerado — quem deixou de te seguir depois disso ainda aparece.',
@@ -221,8 +232,14 @@ function toItems(
   }
 }
 
-export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
+export function PeopleListScreen({ lista, insights, diff, snapshot, onIniciarFila }: Props) {
   const [busca, setBusca] = useState('');
+  /*
+   * Modo seleção: `null` é "desligado". Ligado, o toque na linha marca em vez de
+   * abrir o perfil — dois comportamentos no mesmo gesto, separados por um modo
+   * explícito, que é como toda lista de e-mail resolve isto.
+   */
+  const [selecionados, setSelecionados] = useState<Set<string> | null>(null);
   // Só aparece se o aparelho recusar tanto o app quanto o navegador. Raro, mas
   // silenciar seria pior: o usuário ficaria tocando numa linha que não responde.
   const [falhouAoAbrir, setFalhouAoAbrir] = useState(false);
@@ -245,6 +262,36 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
 
   const abrir = (username: string) => {
     void abrirPerfil(username).then((ok) => setFalhouAoAbrir(!ok));
+  };
+
+  /* A ação desta lista, ou null quando não há nada a fazer com estas contas. */
+  const acao = onIniciarFila ? acaoDaLista(lista) : null;
+  const emSelecao = selecionados !== null;
+
+  const alternar = (username: string) => {
+    setSelecionados((atual) => {
+      const proximo = new Set(atual ?? []);
+      if (proximo.has(username)) proximo.delete(username);
+      else proximo.add(username);
+      return proximo;
+    });
+  };
+
+  /*
+   * "Todos" marca o que está **filtrado**, não a lista inteira.
+   *
+   * É o que a pessoa espera depois de digitar na busca, e é o que evita o pior
+   * acidente possível aqui: buscar "loja", tocar em todos e sair com 600 contas
+   * marcadas em vez de 12.
+   */
+  const marcarTodosFiltrados = () => {
+    const todos = new Set(selecionados ?? []);
+    const jaTemTodos = filtrados.every((i) => todos.has(i.username));
+    for (const item of filtrados) {
+      if (jaTemTodos) todos.delete(item.username);
+      else todos.add(item.username);
+    }
+    setSelecionados(todos);
   };
 
   return (
@@ -274,11 +321,34 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
               </View>
             ) : null}
 
-            <Text style={s.count}>
-              {filtrados.length === items.length
-                ? `${items.length} ${items.length === 1 ? 'pessoa' : 'pessoas'}`
-                : `${filtrados.length} de ${items.length}`}
-            </Text>
+            <View style={s.linhaContagem}>
+              <Text style={s.count}>
+                {filtrados.length === items.length
+                  ? `${items.length} ${items.length === 1 ? 'pessoa' : 'pessoas'}`
+                  : `${filtrados.length} de ${items.length}`}
+              </Text>
+
+              {acao && items.length > 0 ? (
+                <Pressable
+                  onPress={() => (emSelecao ? setSelecionados(null) : setSelecionados(new Set()))}
+                  accessibilityRole="button"
+                >
+                  <Text style={s.acaoTexto}>{emSelecao ? 'Cancelar' : 'Selecionar'}</Text>
+                </Pressable>
+              ) : null}
+
+              {emSelecao ? (
+                <Pressable onPress={marcarTodosFiltrados} accessibilityRole="button">
+                  <Text style={s.acaoTexto}>
+                    {filtrados.every((i) => selecionados.has(i.username))
+                      ? 'Nenhum'
+                      : busca
+                        ? 'Todos os filtrados'
+                        : 'Todos'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
 
             {falhouAoAbrir ? (
               <Banner
@@ -342,7 +412,8 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
             {...(item.approximate ? { approximate: true } : {})}
             {...(item.badge ? { badge: item.badge } : {})}
             {...(lista === 'entraram' ? { destaque: true } : {})}
-            onPress={() => abrir(item.username)}
+            {...(emSelecao ? { selecionado: selecionados.has(item.username) } : {})}
+            onPress={() => (emSelecao ? alternar(item.username) : abrir(item.username))}
           />
         )}
         ListEmptyComponent={
@@ -357,12 +428,56 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
           />
         }
       />
+
+      {/*
+       * Barra de ação, fixa no rodapé e só em modo seleção.
+       *
+       * Fixa porque a lista tem centenas de linhas: um botão que rolasse junto
+       * obrigaria a voltar ao topo depois de marcar a última conta lá embaixo.
+       */}
+      {emSelecao && acao ? (
+        <View style={s.barraAcao}>
+          <Text style={s.barraTexto}>
+            {selecionados.size === 0
+              ? 'Marque quem você quer resolver'
+              : `${selecionados.size} ${selecionados.size === 1 ? 'conta marcada' : 'contas marcadas'}`}
+          </Text>
+          <Button
+            label={TEXTO_DA_ACAO[acao].titulo}
+            onPress={() => {
+              onIniciarFila?.([...selecionados]);
+              setSelecionados(null);
+            }}
+            {...(selecionados.size === 0 ? { disabled: true } : {})}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.base },
+  linhaContagem: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  acaoTexto: {
+    color: colors.gained,
+    fontSize: typography.scale.caption,
+    fontFamily: typography.display.semibold,
+  },
+  barraAcao: {
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.md,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  barraTexto: {
+    color: colors.inkMuted,
+    fontSize: typography.scale.caption,
+    textAlign: 'center',
+  },
   count: {
     color: colors.inkFaint,
     fontSize: typography.scale.micro,

@@ -66,6 +66,7 @@ import {
   TITULOS_ATIVIDADE,
   type ListaDeAtividade,
 } from './screens/AtividadeListaScreen';
+import { FilaScreen } from './screens/FilaScreen';
 import { PerfilScreen } from './screens/PerfilScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { AtualizarScreen } from './screens/AtualizarScreen';
@@ -75,6 +76,14 @@ import { LimiteDeErro } from './components/LimiteDeErro';
 import { ConviteDeConta } from './components/ConviteDeConta';
 import { relatarErro } from './lib/telemetria';
 import { lerAjuste, salvarAjuste } from './lib/storage';
+import {
+  acaoDaLista,
+  criarFila,
+  lerFila,
+  salvarFila,
+  TEXTO_DA_ACAO,
+  type Fila,
+} from './lib/fila';
 import { useStore } from './lib/store';
 import { useConta } from './lib/conta';
 import { useBotaoVoltar } from './lib/voltar';
@@ -89,6 +98,7 @@ type Empilhada =
   | { nome: 'atividade' }
   | { nome: 'atividadeLista'; lista: ListaDeAtividade }
   | { nome: 'entrar'; modo: 'entrar' | 'cadastrar'; motivo?: string }
+  | { nome: 'fila' }
   | null;
 
 /** Chave do ajuste que marca as boas-vindas como já vistas. */
@@ -194,6 +204,23 @@ function App() {
   const [bemVindoVisto, setBemVindoVisto] = useState<boolean | null>(null);
 
   /*
+   * A fila de faxina em andamento, se houver.
+   *
+   * Mora aqui e não na tela porque sobrevive à navegação: a pessoa sai da fila,
+   * confere uma lista, volta, e o lugar continua guardado. Persistida em disco
+   * pelo mesmo motivo — uma fila de 300 contas não se resolve numa sessão.
+   */
+  const [fila, setFila] = useState<Fila | null>(null);
+
+  /*
+   * Nome do zip do último import bem-sucedido, até a pessoa dispensar o aviso.
+   * Só o nome — o caminho de um `content://` do Android não é um caminho de
+   * sistema que dê para mostrar, e inventar um mandaria a pessoa procurar onde
+   * não está.
+   */
+  const [arquivoParaApagar, setArquivoParaApagar] = useState<string | null>(null);
+
+  /*
    * Fonte de display dos títulos.
    *
    * Os arquivos vêm dentro do app, então "carregar" aqui é ler do disco: alguns
@@ -218,7 +245,7 @@ function App() {
 
   const { loading, importing, progress, snapshot, reports, snapshotCount, atividade, error, boot, importZip } =
     useStore();
-  const { conectado, perfil, iniciar, precisaAtualizar } = useConta();
+  const { conectado, perfil, iniciar, precisaAtualizar, envio } = useConta();
 
   useEffect(() => {
     void boot();
@@ -227,7 +254,48 @@ function App() {
     // permissão: isso só acontece quando a pessoa liga o lembrete no perfil.
     void prepararNotificacoes();
     void lerAjuste(AJUSTE_BEM_VINDO).then((v) => setBemVindoVisto(v === 'sim'));
+    void lerFila().then(setFila);
   }, [boot, iniciar]);
+
+  /*
+   * Recarrega o store quando a restauração termina.
+   *
+   * A restauração grava snapshots no disco por fora do store, e sem isto eles só
+   * apareceriam na próxima abertura do app — o pior momento possível, porque a
+   * pessoa acabou de entrar na conta num aparelho novo justamente para ver o
+   * histórico e continuaria olhando "envie seu primeiro arquivo".
+   */
+  useEffect(() => {
+    if (envio.situacao === 'restaurado' && envio.quantos > 0) void boot();
+  }, [envio, boot]);
+
+  /*
+   * Guarda a fila a cada mudança. Escrever a cada conta resolvida é barato — é
+   * um JSON de algumas centenas de @ — e é o que faz a fila sobreviver ao app
+   * ser fechado no meio, que é o caso normal numa lista longa.
+   */
+  const mudarFila = useCallback((proxima: Fila) => {
+    setFila(proxima);
+    void salvarFila(proxima);
+  }, []);
+
+  const descartarFila = useCallback(() => {
+    setFila(null);
+    void salvarFila(null);
+    setEmpilhada(null);
+  }, []);
+
+  const iniciarFila = useCallback(
+    (lista: ListaId, usernames: string[]) => {
+      const acao = acaoDaLista(lista);
+      if (!acao || usernames.length === 0) return;
+      const nova = criarFila(acao, usernames);
+      setFila(nova);
+      void salvarFila(nova);
+      setEmpilhada({ nome: 'fila' });
+    },
+    [],
+  );
 
   const concluirBemVindo = useCallback(() => {
     setBemVindoVisto(true);
@@ -300,6 +368,7 @@ function App() {
       // O relógio do lembrete parte da última atualização. Sem reancorar aqui,
       // ele tocaria logo depois de a pessoa ter acabado de atualizar.
       void reagendarLembrete(Date.now());
+      setArquivoParaApagar(fonte.nome);
       setConviteDispensado(false);
       setEmpilhada(null);
       setAba('inicio');
@@ -362,7 +431,9 @@ function App() {
                 ? empilhada.modo === 'cadastrar'
                   ? 'Criar conta'
                   : 'Entrar'
-                : undefined;
+                : empilhada?.nome === 'fila' && fila
+                  ? TEXTO_DA_ACAO[fila.acao].titulo
+                  : undefined;
 
   const semDados = !snapshot || !reports;
   // O store liga `importing` por conta própria; a fase local cobre o trecho
@@ -459,12 +530,20 @@ function App() {
             {...(empilhada.motivo ? { motivo: empilhada.motivo } : {})}
             aoConcluir={() => setEmpilhada(null)}
           />
+        ) : empilhada?.nome === 'fila' && fila ? (
+          <FilaScreen
+            fila={fila}
+            onMudar={mudarFila}
+            onSair={() => setEmpilhada(null)}
+            onDescartar={descartarFila}
+          />
         ) : empilhada?.nome === 'lista' ? (
           <PeopleListScreen
             lista={empilhada.lista}
             insights={reports.insights}
             diff={reports.diff}
             snapshot={snapshot}
+            onIniciarFila={(usernames) => iniciarFila(empilhada.lista, usernames)}
           />
         ) : empilhada?.nome === 'stats' ? (
           <StatsScreen reports={reports} snapshotCount={snapshotCount} />
@@ -494,6 +573,23 @@ function App() {
             conversasPendentes={
               atividade ? atividade.conversations.filter((c) => c.awaitingYou).length : null
             }
+            {...(arquivoParaApagar
+              ? {
+                  arquivoParaApagar: {
+                    nome: arquivoParaApagar,
+                    onDispensar: () => setArquivoParaApagar(null),
+                  },
+                }
+              : {})}
+            {...(fila && fila.pendentes.length > 0
+              ? {
+                  fila: {
+                    restantes: fila.pendentes.length,
+                    titulo: TEXTO_DA_ACAO[fila.acao].titulo,
+                    onAbrir: () => setEmpilhada({ nome: 'fila' }),
+                  },
+                }
+              : {})}
             convite={
               /*
                * O convite só existe para quem não tem conta, e só depois do
