@@ -31,6 +31,23 @@ export function deepLinkDoPerfil(username: string): string {
 }
 
 /**
+ * URL da busca do Instagram por um nome.
+ *
+ * Existe porque, nas conversas, o @ quase nunca é descobrível: a pasta do
+ * export é o nome de exibição achatado, e as listas de seguidores vêm sem nome
+ * de exibição, então não há chave que ligue os dois lados (medido no export
+ * real: 1.480 de 1.573 pastas são o título da conversa). Ver
+ * `core/src/activity.ts`.
+ *
+ * Em vez de adivinhar um @ e mandar a pessoa para o perfil de um estranho, o app
+ * entrega ao Instagram a mesma busca que o usuário faria na mão. O nome sai do
+ * aparelho só nesse gesto, e só para o Instagram, que já o tem.
+ */
+export function urlDaBusca(nome: string): string {
+  return `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(nome.trim())}`;
+}
+
+/**
  * Abre o perfil e devolve se conseguiu.
  *
  * Nunca lança: uma lista com centenas de linhas não pode quebrar porque um toque
@@ -81,5 +98,40 @@ export async function abrirPerfil(username: string): Promise<boolean> {
       // Sem log: o @ é conteúdo de snapshot e não vai para lugar nenhum (regra 5).
       return false;
     }
+  }
+}
+
+/**
+ * Abre a busca do Instagram por um nome, e devolve se conseguiu.
+ *
+ * Sem deep link: `instagram://` não tem rota de busca documentada, e chutar uma
+ * faria o aparelho recusar em silêncio. A URL universal abre no app quando ele
+ * está instalado e no navegador quando não está.
+ */
+export async function buscarNoInstagram(nome: string): Promise<boolean> {
+  const url = urlDaBusca(nome);
+
+  if (Platform.OS === 'web') {
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    await Linking.openURL(url);
+    return true;
+  } catch {
+    // Sem log: o nome veio de uma conversa e não vai para lugar nenhum (regra 5).
+    return false;
   }
 }

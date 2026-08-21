@@ -17,6 +17,7 @@ import {
   parseProfileSearches,
   readConversation,
   summarizeConversations,
+  TAMANHO_DA_PREVIA,
   type ConversationDraft,
 } from '../activity.js';
 
@@ -70,6 +71,90 @@ describe('readConversation', () => {
   });
 });
 
+/**
+ * A prévia das mensagens.
+ *
+ * O que estes testes protegem não é a formatação: é o limite. Duas mensagens,
+ * truncadas, sem mídia e sem o nome de quem reagiu. Se um dia alguém precisar de
+ * "só mais um pouquinho de conversa", é aqui que a conta aparece.
+ */
+describe('readConversation — prévia', () => {
+  const conversaRica = (mensagens: unknown[]) => ({
+    participants: [{ name: 'Ana' }, { name: EU }],
+    messages: mensagens,
+    title: 'Ana',
+    thread_path: 'inbox/x',
+  });
+
+  it('guarda as duas últimas, da mais nova para a mais antiga', () => {
+    const d = readConversation(
+      conversaRica([
+        { sender_name: 'Ana', timestamp_ms: 1_000, content: 'a mais velha' },
+        { sender_name: EU, timestamp_ms: 3_000, content: 'a mais nova' },
+        { sender_name: 'Ana', timestamp_ms: 2_000, content: 'a do meio' },
+      ]),
+      'ana_1',
+    );
+
+    expect(d?.lastMessages.map((m) => m.text)).toEqual(['a mais nova', 'a do meio']);
+  });
+
+  it('nunca guarda mais que duas, mesmo numa conversa longa', () => {
+    const muitas = Array.from({ length: 500 }, (_, i) => ({
+      sender_name: 'Ana',
+      timestamp_ms: i,
+      content: `mensagem ${i}`,
+    }));
+
+    const d = readConversation(conversaRica(muitas), 'ana_1');
+    expect(d?.lastMessages).toHaveLength(2);
+    expect(d?.messageCount).toBe(500);
+  });
+
+  it('trunca o texto no tamanho da prévia', () => {
+    const d = readConversation(
+      conversaRica([{ sender_name: 'Ana', timestamp_ms: 1, content: 'x'.repeat(500) }]),
+      'ana_1',
+    );
+
+    expect(d?.lastMessages[0].text).toHaveLength(TAMANHO_DA_PREVIA);
+    expect(d?.lastMessages[0].text.endsWith('…')).toBe(true);
+  });
+
+  it('troca mídia por rótulo, sem guardar caminho nem link', () => {
+    const d = readConversation(
+      conversaRica([
+        { sender_name: 'Ana', timestamp_ms: 2, photos: [{ uri: 'messages/inbox/x/foto.jpg' }] },
+        { sender_name: 'Ana', timestamp_ms: 1, share: { link: 'https://instagram.com/p/abc' } },
+      ]),
+      'ana_1',
+    );
+
+    expect(d?.lastMessages[0]).toMatchObject({ kind: 'photo', text: '' });
+    expect(d?.lastMessages[1]).toMatchObject({ kind: 'share', text: '' });
+    expect(JSON.stringify(d?.lastMessages)).not.toContain('foto.jpg');
+    expect(JSON.stringify(d?.lastMessages)).not.toContain('instagram.com');
+  });
+
+  it('conserta o mojibake do emoji da reação', () => {
+    // Como o export traz "❤️": os bytes UTF-8 (E2 9D A4 EF B8 8F) um a um.
+    const cru = '\u00e2\u009d\u00a4\u00ef\u00b8\u008f';
+    const d = readConversation(
+      conversaRica([
+        {
+          sender_name: EU,
+          timestamp_ms: 1,
+          content: 'oi',
+          reactions: [{ reaction: cru, actor: 'Ana' }],
+        },
+      ]),
+      'ana_1',
+    );
+
+    expect(d?.lastMessages[0].reaction).toBe('❤️');
+  });
+});
+
 describe('detectSelfName', () => {
   const rascunho = (participants: string[]): ConversationDraft => ({
     folder: 'f',
@@ -78,6 +163,7 @@ describe('detectSelfName', () => {
     lastMessageAt: 0,
     lastSender: '',
     messageCount: 1,
+    lastMessages: [],
   });
 
   it('escolhe quem aparece em todas as conversas', () => {
@@ -120,7 +206,8 @@ describe('summarizeConversations', () => {
   const drafts = [
     readConversation(conversa('Ana', [['Ana', 5_000]]), 'ana_111')!,
     readConversation(conversa('Bruno', [[EU, 4_000]]), 'bruno_222')!,
-    readConversation(conversa('Carla', [['Carla', 6_000]]), 'carla.dias_333')!,
+    // Pasta sem o ponto, que é como o Instagram nomeia a de "@carla.dias".
+    readConversation(conversa('Carla', [['Carla', 6_000]]), 'carladias_333')!,
   ];
 
   it('marca como pendente só o que a outra pessoa falou por último', () => {
@@ -141,9 +228,107 @@ describe('summarizeConversations', () => {
     const porNome = Object.fromEntries(conversations.map((c) => [c.with, c.username]));
 
     expect(porNome['Ana']).toBe('ana');
-    // A pasta é "carla.dias_333" mas o Instagram tira o ponto do nome da pasta,
-    // então "carla.dias" não bate; adivinhar levaria a um perfil de outra pessoa.
+    // Ninguém conhece o @ do Bruno: sem chute.
     expect(porNome['Bruno']).toBeUndefined();
+  });
+
+  it('não tenta adivinhar o @ a partir do nome da pasta', () => {
+    /*
+     * Medido no export real em 20/08/2026: a pasta é o **título achatado** da
+     * conversa, não o @ — 1.480 de 1.573. Então "carladias_333" é o nome de
+     * exibição "Carla Dias", e casá-lo com o @ "carla.dias" seria um palpite
+     * sobre outra pessoa. A conversa fica sem link, e a tela oferece busca.
+     */
+    const { conversations } = summarizeConversations(drafts, new Set(['carla.dias']));
+    const porNome = Object.fromEntries(conversations.map((c) => [c.with, c.username]));
+
+    expect(porNome['Carla']).toBeUndefined();
+  });
+
+  it('reagir conta como responder', () => {
+    // O caso real: a pessoa manda algo, você responde com ❤️ e não digita nada.
+    // Antes de 20/08/2026 a conversa continuava sendo cobrada como não respondida.
+    const comReacaoMinha = readConversation(
+      {
+        participants: [{ name: 'Ana' }, { name: EU }],
+        title: 'Ana',
+        messages: [
+          {
+            sender_name: 'Ana',
+            timestamp_ms: 5_000,
+            content: 'olha isso',
+            reactions: [{ reaction: '❤️', actor: EU }],
+          },
+        ],
+      },
+      'ana_111',
+    )!;
+
+    const { conversations } = summarizeConversations([comReacaoMinha, ...drafts.slice(1)]);
+    const porNome = Object.fromEntries(conversations.map((c) => [c.with, c.awaitingYou]));
+
+    expect(porNome['Ana']).toBe(false);
+  });
+
+  it('reação da outra pessoa não me tira a vez de responder', () => {
+    const elaReagiu = readConversation(
+      {
+        participants: [{ name: 'Ana' }, { name: EU }],
+        title: 'Ana',
+        messages: [
+          {
+            sender_name: 'Ana',
+            timestamp_ms: 5_000,
+            content: 'e aí?',
+            reactions: [{ reaction: '❤️', actor: 'Ana' }],
+          },
+        ],
+      },
+      'ana_111',
+    )!;
+
+    const { conversations } = summarizeConversations([elaReagiu, ...drafts.slice(1)]);
+    const porNome = Object.fromEntries(conversations.map((c) => [c.with, c.awaitingYou]));
+
+    expect(porNome['Ana']).toBe(true);
+  });
+
+  it('não deixa o nome de quem reagiu chegar ao resumo', () => {
+    // `reactors` existe no rascunho para decidir `awaitingYou` e morre ali. O que
+    // é guardado no aparelho é o resumo, e nele sobra só o emoji.
+    const comReacao = readConversation(
+      {
+        participants: [{ name: 'Ana' }, { name: EU }],
+        title: 'Ana',
+        messages: [
+          {
+            sender_name: 'Ana',
+            timestamp_ms: 5_000,
+            content: 'oi',
+            reactions: [{ reaction: '❤️', actor: EU }],
+          },
+        ],
+      },
+      'ana_111',
+    )!;
+
+    const { conversations } = summarizeConversations([comReacao, ...drafts.slice(1)]);
+    // Por nome, e não por posição: a lista sai ordenada pela conversa mais recente.
+    const ana = conversations.find((c) => c.with === 'Ana')!;
+    const serializado = JSON.stringify(ana.lastMessages);
+
+    expect(serializado).not.toContain('reactors');
+    expect(ana.lastMessages[0]).toMatchObject({
+      reaction: '❤️',
+      reactedByYou: true,
+    });
+  });
+
+  it('marca quais mensagens são suas', () => {
+    const { conversations } = summarizeConversations(drafts);
+    const bruno = conversations.find((c) => c.with === 'Bruno')!;
+
+    expect(bruno.lastMessages[0].fromYou).toBe(true);
   });
 
   it('não marca nada como pendente quando não sabe quem é o dono', () => {

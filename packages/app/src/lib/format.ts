@@ -57,7 +57,17 @@ export function describeEvent(event: FollowEvent): string {
   const mesmoDia =
     new Date(event.windowStart).toDateString() === new Date(event.windowEnd).toDateString();
 
-  if (mesmoDia) return `saiu em ${formatDate(event.windowEnd)}`;
+  /*
+   * A data nunca é a da saída — o export não registra quando alguém deixou de
+   * seguir. É a janela entre os dois arquivos, e o texto tem que dizer isso.
+   *
+   * Quando os dois imports caem no mesmo dia a janela colapsa, e a versão
+   * anterior escrevia "saiu em 20 de ago." — que lê exatamente como a data
+   * exata que o app não tem. Pior ainda: essa data é a do import, então a lista
+   * inteira aparecia com a data de hoje, e o usuário conclui, com razão, que
+   * alguma coisa está errada. Foi o que aconteceu em 20/08/2026.
+   */
+  if (mesmoDia) return `saiu entre suas duas atualizações de ${formatDate(event.windowEnd)}`;
   return `saiu entre ${formatDate(event.windowStart)} e ${formatDate(event.windowEnd)}`;
 }
 

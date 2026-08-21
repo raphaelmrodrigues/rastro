@@ -298,3 +298,81 @@ Confiança alta colapsa o par; confiança média marca o evento e deixa o usuár
 
 A UI precisa deixar essa diferença clara. Mostrar "saiu em 12/03 às 14h" quando na
 verdade foi "entre 01/03 e 15/03" é mentira, e o usuário descobre.
+
+---
+
+# Mensagens: o que dá e o que não dá para fazer
+
+Medido no export real de 13/08/2026 — 1.583 conversas, 54.100 mensagens.
+
+## Forma do arquivo
+
+`your_instagram_activity/messages/inbox/<pasta>/message_N.json`:
+
+```jsonc
+{
+  "participants": [{ "name": "Ana Souza" }, { "name": "Raphael" }],
+  "title": "Ana Souza",
+  "thread_path": "inbox/anasouza_17841…",
+  "is_still_participant": true,
+  "messages": [
+    {
+      "sender_name": "Ana Souza",
+      "timestamp_ms": 1755000000000,
+      "content": "texto, quando existe",
+      "reactions": [{ "reaction": "<mojibake>", "actor": "Raphael" }]
+    }
+  ]
+}
+```
+
+Frequência das chaves de mensagem, em 54.100 mensagens:
+
+| Chave | Vezes | Observação |
+|---|---|---|
+| `sender_name`, `timestamp_ms` | 54.100 | sempre presentes |
+| `content` | 46.345 | **falta em ~14%** — o resto é mídia |
+| `share` | 9.483 | post ou reel encaminhado |
+| `reactions` | 2.815 | ver abaixo |
+| `audio_files` | 622 | |
+| `photos` | 237 | |
+| `call_duration` | 40 | |
+| `videos` | 23 | |
+
+Uma prévia de conversa que só olhe `content` mostra vazio em 14% das mensagens.
+Por isso `activity.ts` traduz a mídia num rótulo (`kind`).
+
+## Reações não são mensagens
+
+A reação vive **dentro** da mensagem que ela responde, em `reactions[]`, com
+`{ reaction, actor }` e às vezes `timestamp` (1.859 das 2.875 reações o trazem —
+não conte com ele).
+
+Consequência para "você não respondeu": responder com ❤️ não cria mensagem
+nenhuma, então olhar só `sender_name` da última mensagem acusa como não
+respondida uma conversa que foi respondida. No export do dono isso eram **44
+conversas** cobradas à toa. Ver `awaitingYou` em `core/src/activity.ts`.
+
+O emoji vem com o mojibake de sempre (UTF-8 lido como Latin-1): `❤️` chega como
+os seis bytes `E2 9D A4 EF B8 8F`, um caractere por byte. `repairMojibake`
+resolve.
+
+## Não existe ligação entre conversa e perfil
+
+Este é um beco sem saída, e é bom que esteja escrito para ninguém tentar de novo:
+
+- O arquivo da conversa **não traz o @** de ninguém. Só `sender_name` e `title`,
+  que são nome de exibição.
+- O nome da pasta **não é o @**. Em **1.480 de 1.573** conversas ele é o `title`
+  achatado — sem acento, sem espaço, minúsculo. Só 49 pastas coincidem com um @
+  conhecido, e coincidem porque aquelas pessoas usam o @ como nome de exibição.
+- As listas de seguidores do export JSON vêm **sem nome de exibição**: 0 de 1.361
+  contas têm o campo preenchido.
+
+Ou seja: um lado só tem nome, o outro só tem @, e não há coluna em comum. Casar
+por forma normalizada (ignorar pontos, por exemplo) não resolve — produz palpite
+sobre nome de exibição e manda o usuário ao perfil de um estranho. Foi tentado e
+desfeito em 20/08/2026, com ganho de 9 links, todos duvidosos.
+
+A saída que o app usa é abrir a **busca** do Instagram pelo nome, em vez de fingir
+que sabe o perfil.

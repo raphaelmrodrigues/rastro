@@ -287,6 +287,35 @@ export function PeopleListScreen({ lista, insights, diff, snapshot }: Props) {
                 body="Elas continuam te seguindo, só mudaram de nome de usuário. Não contamos como saída."
               />
             ) : null}
+
+            {/*
+             * O aviso de confiabilidade, na própria lista.
+             *
+             * Ele já existia no painel, e o CLAUDE.md manda não imprimir a lista
+             * de nomes sem mostrá-lo antes — mas quem entra direto num recorte
+             * pelo menu nunca passava pelo painel. Aqui é onde a pessoa lê os
+             * nomes e conclui que fulano a abandonou; é aqui que precisa saber
+             * que parte disso pode ser recorte do arquivo.
+             */}
+            {lista === 'saíram' && diff?.reliability.level === 'suspect' ? (
+              <Banner
+                title="Esta lista pode estar exagerada"
+                tone="danger"
+                body={diff.reliability.reasons.join(' ')}
+              />
+            ) : null}
+
+            {/*
+             * Só na lista de quem saiu: conta apagada ou banida some da sua lista
+             * sem ninguém ter deixado de seguir, e o perfil dá "não encontrado"
+             * ao abrir. Sem esta frase o usuário conclui que o app inventou o @.
+             */}
+            {lista === 'saíram' && items.length > 0 ? (
+              <Text style={s.explicacao}>
+                Se o perfil não abrir no Instagram, a conta foi apagada, banida ou trocou de @ —
+                é um dos jeitos de alguém sumir da sua lista sem ter deixado de seguir.
+              </Text>
+            ) : null}
           </View>
         }
         /*

@@ -6,23 +6,27 @@
  *
  * Duas decisões que atravessam o arquivo:
  *
- * 1. **Conversa não abre perfil por padrão.** O arquivo da conversa traz nome de
- *    exibição, não @; o @ só existe no nome da pasta, e lá o Instagram remove os
- *    pontos. Como `ana.souza` e `anasouza` viram a mesma coisa, adivinhar
- *    mandaria a pessoa para o perfil de um estranho. Só vira link quando bate
- *    exatamente com um @ que já conhecemos das listas de seguidores.
- * 2. **Nenhum texto de mensagem aparece aqui**, nem prévia. O app não guarda
- *    isso — ver `core/src/activity.ts`.
+ * 1. **Conversa quase nunca abre perfil, e agora se sabe por quê.** O arquivo da
+ *    conversa traz nome de exibição, não @. O nome da pasta também não é o @: em
+ *    1.480 de 1.573 conversas do export real ele é o *título* achatado. E as
+ *    listas de seguidores vêm sem nome de exibição, então não existe chave que
+ *    ligue os dois lados. O link só aparece nas poucas contas cujo nome de
+ *    exibição é igual ao @. Para todas as outras a linha oferece **buscar o nome
+ *    no Instagram**, que é o que a pessoa faria na mão.
+ * 2. **A prévia das duas últimas mensagens aparece aqui** desde 20/08/2026, por
+ *    decisão do dono: sem ela a lista é um monte de nome e data que não diz do
+ *    que era a conversa. Só texto, truncado, e só as duas — o limite mora em
+ *    `core/src/activity.ts` e nada disso sobe para o servidor.
  */
 
 import { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
-import type { ActivityData } from '@rastro/core';
+import type { ActivityData, MessagePreview } from '@rastro/core';
 import { Banner, EmptyState, PersonRow } from '../components/ui';
 import { IconeBusca } from '../components/icons';
 import { colors, radius, space, typography } from '../lib/theme';
 import { formatDate, formatNumber, formatRelative } from '../lib/format';
-import { abrirPerfil } from '../lib/perfil';
+import { abrirPerfil, buscarNoInstagram } from '../lib/perfil';
 
 export type ListaDeAtividade =
   | 'nao-respondidas'
@@ -38,8 +42,8 @@ export const TITULOS_ATIVIDADE: Record<
   'nao-respondidas': {
     title: 'Você não respondeu',
     explicacao:
-      'Conversas em que a última mensagem é da outra pessoa. O app não lê o conteúdo — só ' +
-      'quem falou por último e quando.',
+      'Conversas em que a última mensagem é da outra pessoa e você não respondeu nem reagiu. ' +
+      'Reagir com emoji conta como resposta.',
     vazio: 'Nenhuma conversa esperando por você. Caixa de entrada em dia.',
   },
   conversas: {
@@ -68,11 +72,44 @@ export const TITULOS_ATIVIDADE: Record<
   },
 };
 
+/**
+ * Uma mensagem já pronta para a linha: quem falou e o quê, numa string só.
+ *
+ * Montada aqui e não no core porque é texto de interface — o core devolve os
+ * pedaços (`fromYou`, `text`, `kind`, `reaction`) e quem escreve em português
+ * é a camada de tela.
+ */
+function previaDaMensagem(m: MessagePreview): string {
+  const quem = m.fromYou ? 'Você' : 'Ela(e)';
+  const corpo = m.text || ROTULO_DA_MIDIA[m.kind ?? 'share'];
+  // A reação vai no fim porque ela é o desfecho da mensagem, não o começo.
+  const reacao = m.reaction ? ` ${m.reaction}${m.reactedByYou ? ' (você)' : ''}` : '';
+  return `${quem}: ${corpo}${reacao}`;
+}
+
+/** O que mostrar quando a mensagem não tinha texto. */
+const ROTULO_DA_MIDIA: Record<NonNullable<MessagePreview['kind']>, string> = {
+  photo: 'mandou uma foto',
+  video: 'mandou um vídeo',
+  audio: 'mandou um áudio',
+  share: 'compartilhou um post',
+  call: 'chamada',
+};
+
 interface Item {
   chave: string;
   titulo: string;
   /** @ para abrir o perfil. Ausente = a linha não é clicável. */
   username?: string;
+  /**
+   * Nome para procurar no Instagram, quando não há @.
+   *
+   * É a saída honesta do problema descrito no topo do arquivo: sem chave que
+   * ligue conversa a perfil, o melhor que o app pode fazer é abrir a busca.
+   */
+  buscar?: string;
+  /** Prévia das últimas mensagens, da mais nova para a mais antiga. */
+  previa?: string[];
   detalhe?: string;
   etiqueta?: string;
 }
@@ -86,7 +123,8 @@ function toItems(lista: ListaDeAtividade, a: ActivityData): Item[] {
   const daConversa = (c: ActivityData['conversations'][number]): Item => ({
     chave: `${c.with}-${c.lastMessageAt}`,
     titulo: c.with,
-    ...(c.username ? { username: c.username } : {}),
+    ...(c.username ? { username: c.username } : { buscar: c.with }),
+    ...(c.lastMessages.length > 0 ? { previa: c.lastMessages.map(previaDaMensagem) } : {}),
     detalhe:
       c.lastMessageAt > 0
         ? `última mensagem ${formatRelative(c.lastMessageAt)} · ${formatDate(c.lastMessageAt)}`
@@ -144,11 +182,26 @@ export function AtividadeListaScreen({ lista, atividade }: Props) {
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     if (!termo) return items;
-    return items.filter((i) => i.titulo.toLowerCase().includes(termo));
+    // A busca alcança a prévia, e não só o nome: com o texto na tela, procurar
+    // pelo assunto ("aluguel", "churrasco") é a forma natural de achar de novo
+    // uma conversa cujo nome não se lembra.
+    return items.filter(
+      (i) =>
+        i.titulo.toLowerCase().includes(termo) ||
+        (i.previa ?? []).some((linha) => linha.toLowerCase().includes(termo)),
+    );
   }, [items, busca]);
 
   const abrir = (username: string) => {
     void abrirPerfil(username).then((ok) => setFalhouAoAbrir(!ok));
+  };
+
+  /*
+   * Sem @ conhecido, abre a busca do Instagram pelo nome. Não é o mesmo que
+   * abrir o perfil e a tela não finge que é: a pessoa cai na busca e escolhe.
+   */
+  const procurar = (nome: string) => {
+    void buscarNoInstagram(nome).then((ok) => setFalhouAoAbrir(!ok));
   };
 
   return (
@@ -200,15 +253,36 @@ export function AtividadeListaScreen({ lista, atividade }: Props) {
           </View>
         }
         renderItem={({ item }) => (
-          <PersonRow
-            username={item.titulo}
-            // "comentei" e "buscas" já trazem o @ montado no título; conversa e
-            // anunciante são nome de pessoa e de empresa, e não levam arroba.
-            comoArroba={false}
-            {...(item.detalhe ? { detail: item.detalhe } : {})}
-            {...(item.etiqueta ? { badge: item.etiqueta } : {})}
-            {...(item.username ? { onPress: () => abrir(item.username as string) } : {})}
-          />
+          <View>
+            <PersonRow
+              username={item.titulo}
+              // "comentei" e "buscas" já trazem o @ montado no título; conversa e
+              // anunciante são nome de pessoa e de empresa, e não levam arroba.
+              comoArroba={false}
+              {...(item.detalhe ? { detail: item.detalhe } : {})}
+              {...(item.etiqueta ? { badge: item.etiqueta } : {})}
+              {...(item.username
+                ? { onPress: () => abrir(item.username as string) }
+                : item.buscar
+                  ? { onPress: () => procurar(item.buscar as string) }
+                  : {})}
+            />
+
+            {/*
+             * A prévia fica sob a linha, recuada até onde o avatar termina, para
+             * ler como continuação daquele nome e não como item novo. Duas
+             * linhas no máximo, que é o que o core guarda.
+             */}
+            {item.previa?.length ? (
+              <View style={s.previa}>
+                {item.previa.map((linha, i) => (
+                  <Text key={i} style={i === 0 ? s.previaRecente : s.previaAnterior}>
+                    {linha}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
         )}
         ListEmptyComponent={
           <EmptyState
@@ -231,6 +305,23 @@ const s = StyleSheet.create({
   },
   list: { paddingHorizontal: space.lg, paddingBottom: space.xl },
   listHeader: { gap: space.sm, paddingTop: space.md, paddingBottom: space.xs },
+  /*
+   * Recuo de 52: o avatar tem 40 e a linha usa 12 de espaço entre ele e o texto.
+   * Alinhar a prévia com o nome, e não com a borda, é o que a faz ler como
+   * continuação da conversa em vez de item solto.
+   */
+  previa: { paddingLeft: 52, paddingRight: space.md, paddingBottom: space.sm, gap: 2 },
+  previaRecente: {
+    color: colors.inkMuted,
+    fontSize: typography.scale.caption,
+    lineHeight: 17,
+  },
+  // A anterior é mais apagada: ela existe como contexto da mais recente.
+  previaAnterior: {
+    color: colors.inkFaint,
+    fontSize: typography.scale.caption,
+    lineHeight: 17,
+  },
   explicacao: { color: colors.inkMuted, fontSize: typography.scale.caption, lineHeight: 19 },
   buscaCaixa: {
     flexDirection: 'row',

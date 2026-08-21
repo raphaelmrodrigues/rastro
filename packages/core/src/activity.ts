@@ -12,11 +12,27 @@
  * Por isso `ActivityData` tem tipo próprio, arquivo próprio e caminho de
  * persistência próprio, só no aparelho.
  *
- * ## O que este módulo não guarda, de propósito
+ * ## O que este módulo guarda de conversa, e o limite (20/08/2026)
  *
- * Nenhum texto de mensagem. Nem trecho, nem prévia, nem contagem de palavras. O
- * que interessa a "você não respondeu" é *quem* e *quando*, e é só isso que
- * atravessa. O conteúdo é lido, reduzido e descartado no mesmo instante.
+ * Até aqui nenhum texto de mensagem atravessava: só *quem* e *quando*. O dono
+ * pediu a mudança depois de usar a tela — uma lista de nomes e datas não diz do
+ * que era a conversa, e "você não respondeu" sem assunto não ajuda a decidir
+ * responder.
+ *
+ * Então passam **as duas últimas mensagens de cada conversa**, truncadas em
+ * {@link TAMANHO_DA_PREVIA} caracteres. E só isso:
+ *
+ * - Só texto. Foto, áudio, vídeo e compartilhamento viram um rótulo (`kind`),
+ *   nunca o arquivo nem o link.
+ * - Nada do histórico anterior às duas últimas.
+ * - Nenhum nome de quem reagiu: da reação sobram o emoji e um booleano dizendo
+ *   se foi você.
+ *
+ * O limite que **não** se move: isto vive em `ActivityData`, que nunca sai do
+ * aparelho (`storage.ts`, `atividade.json`) e não tem caminho de subida para o
+ * servidor. Se algum dia alguém quiser mandar `ActivityData` para a API, é aqui
+ * que a conversa começa de novo — porque a partir dessa mudança o que sobe deixa
+ * de ser uma lista de @s e passa a ser pedaço de DM.
  *
  * ## Limites da fonte, herdados e não contornáveis
  *
@@ -31,6 +47,36 @@ import type { ParseWarning } from './types.js';
 
 /* -------------------------------------------------------------------------- */
 /* Conversas                                                                   */
+
+/** Quanto de cada mensagem sobrevive na prévia. O resto é descartado na leitura. */
+export const TAMANHO_DA_PREVIA = 140;
+
+/** Quantas mensagens do fim da conversa ficam guardadas. */
+const QUANTAS_PREVIAS = 2;
+
+/**
+ * O que veio no lugar do texto.
+ *
+ * Guardar o rótulo e não o conteúdo é proposital: "mandou uma foto" basta para
+ * lembrar da conversa, e o caminho do arquivo dentro do zip não acrescenta nada
+ * que a tela use.
+ */
+export type MessageKind = 'photo' | 'video' | 'audio' | 'share' | 'call';
+
+/** Uma mensagem reduzida ao que a tela mostra. */
+export interface MessagePreview {
+  /** Quem mandou foi o dono da conta. */
+  fromYou: boolean;
+  at: number;
+  /** Texto truncado. Vazio quando a mensagem não tinha texto. */
+  text: string;
+  /** O que veio junto ou no lugar do texto. */
+  kind?: MessageKind;
+  /** Emoji da reação que esta mensagem recebeu, se recebeu. */
+  reaction?: string;
+  /** A reação foi sua. É o que distingue "não respondi" de "respondi com ❤️". */
+  reactedByYou?: boolean;
+}
 
 /**
  * Uma conversa reduzida ao que a tela precisa.
@@ -54,9 +100,29 @@ export interface ConversationSummary {
   /** Quantas pessoas na conversa. Acima de 2 é grupo. */
   participantCount: number;
   lastMessageAt: number;
-  /** A última mensagem não é sua: a bola está com você. */
+  /**
+   * A bola está com você: a última mensagem não é sua e você nem reagiu a ela.
+   *
+   * A reação entra na conta desde 20/08/2026. Responder com ❤️ em vez de digitar
+   * é resposta — e antes disso a conversa continuava sendo cobrada como não
+   * respondida, o que fazia a lista acusar justamente quem tinha sido
+   * respondido do jeito mais comum no Instagram.
+   */
   awaitingYou: boolean;
   messageCount: number;
+  /** As últimas mensagens, da mais nova para a mais antiga. Ver o topo do arquivo. */
+  lastMessages: MessagePreview[];
+}
+
+/** Uma mensagem lida, antes de sabermos qual participante é o dono da conta. */
+export interface MessageDraft {
+  sender: string;
+  at: number;
+  text: string;
+  kind?: MessageKind;
+  /** Nomes de quem reagiu. Some no resumo: dali só sai o booleano `reactedByYou`. */
+  reactors: string[];
+  reaction?: string;
 }
 
 /** Uma conversa lida, antes de sabermos qual participante é o dono da conta. */
@@ -67,11 +133,29 @@ export interface ConversationDraft {
   lastMessageAt: number;
   lastSender: string;
   messageCount: number;
+  lastMessages: MessageDraft[];
+}
+
+interface RawReaction {
+  reaction?: unknown;
+  actor?: unknown;
+}
+
+interface RawMessage {
+  sender_name?: unknown;
+  timestamp_ms?: unknown;
+  content?: unknown;
+  reactions?: unknown;
+  photos?: unknown;
+  videos?: unknown;
+  audio_files?: unknown;
+  share?: unknown;
+  call_duration?: unknown;
 }
 
 interface RawConversation {
   participants?: Array<{ name?: unknown }>;
-  messages?: Array<{ sender_name?: unknown; timestamp_ms?: unknown }>;
+  messages?: RawMessage[];
   title?: unknown;
 }
 
@@ -91,29 +175,88 @@ export function readConversation(json: unknown, folder: string): ConversationDra
 
   /*
    * O export vem da mais nova para a mais antiga (conferido: 1.307 conversas em
-   * ordem decrescente, nenhuma crescente, nenhuma misturada). Ainda assim a
-   * última é buscada por comparação, e não por `messages[0]`: se a ordem mudar
-   * numa versão futura do export, "quem falou por último" inverteria em silêncio
-   * e o app passaria a acusar de não-respondidas justamente as respondidas.
+   * ordem decrescente, nenhuma crescente, nenhuma misturada). Ainda assim as
+   * últimas são buscadas por comparação, e não por `messages[0]`: se a ordem
+   * mudar numa versão futura do export, "quem falou por último" inverteria em
+   * silêncio e o app passaria a acusar de não-respondidas justamente as
+   * respondidas.
+   *
+   * Num passe só, sem ordenar: são 54.100 mensagens no export real, e ordenar
+   * 1.583 arrays para ficar com dois elementos de cada é trabalho jogado fora.
    */
-  let ultima = mensagens[0];
+  const maisNovas: RawMessage[] = [];
+  const quandoDelas: number[] = [];
   for (const m of mensagens) {
-    const t = typeof m?.timestamp_ms === 'number' ? m.timestamp_ms : 0;
-    const atual = typeof ultima?.timestamp_ms === 'number' ? ultima.timestamp_ms : 0;
-    if (t > atual) ultima = m;
+    const t = quando(m);
+    let i = 0;
+    while (i < maisNovas.length && quandoDelas[i]! >= t) i++;
+    if (i >= QUANTAS_PREVIAS) continue;
+    maisNovas.splice(i, 0, m);
+    quandoDelas.splice(i, 0, t);
+    if (maisNovas.length > QUANTAS_PREVIAS) {
+      maisNovas.pop();
+      quandoDelas.pop();
+    }
   }
 
   const participants = (Array.isArray(raw.participants) ? raw.participants : [])
     .map((p) => texto(p?.name))
     .filter(Boolean);
 
+  const lastMessages = maisNovas.map((m, i) => rascunhoDaMensagem(m, quandoDelas[i]!));
+
   return {
     folder,
     title: texto(raw.title),
     participants,
-    lastMessageAt: typeof ultima?.timestamp_ms === 'number' ? ultima.timestamp_ms : 0,
-    lastSender: texto(ultima?.sender_name),
+    lastMessageAt: lastMessages[0]?.at ?? 0,
+    lastSender: lastMessages[0]?.sender ?? '',
     messageCount: mensagens.length,
+    lastMessages,
+  };
+}
+
+const quando = (m: RawMessage): number =>
+  typeof m?.timestamp_ms === 'number' ? m.timestamp_ms : 0;
+
+const temItem = (v: unknown): boolean => Array.isArray(v) && v.length > 0;
+
+/**
+ * O que veio no lugar do texto, quando veio.
+ *
+ * Ordem de precedência escolhida pelo que o usuário lembraria: a foto é o que
+ * marca a conversa, a chamada é o resto. `share` é post ou reel encaminhado — o
+ * link não atravessa, só o rótulo.
+ */
+function tipoDaMensagem(m: RawMessage): MessageKind | undefined {
+  if (temItem(m.photos)) return 'photo';
+  if (temItem(m.videos)) return 'video';
+  if (temItem(m.audio_files)) return 'audio';
+  if (m.share !== undefined && m.share !== null) return 'share';
+  if (typeof m.call_duration === 'number') return 'call';
+  return undefined;
+}
+
+/** Corta a mensagem no tamanho da prévia, sem deixar reticências penduradas. */
+function recortar(t: string): string {
+  const limpo = t.replace(/\s+/g, ' ').trim();
+  return limpo.length <= TAMANHO_DA_PREVIA ? limpo : `${limpo.slice(0, TAMANHO_DA_PREVIA - 1)}…`;
+}
+
+function rascunhoDaMensagem(m: RawMessage, at: number): MessageDraft {
+  const reacoes: RawReaction[] = Array.isArray(m.reactions) ? (m.reactions as RawReaction[]) : [];
+  const tipo = tipoDaMensagem(m);
+  // O emoji vem com o mojibake clássico do export (UTF-8 lido como Latin-1);
+  // sem o reparo, "❤️" chega na tela como "â¤ï¸".
+  const emoji = texto(reacoes[0]?.reaction);
+
+  return {
+    sender: texto(m.sender_name),
+    at,
+    text: recortar(texto(m.content)),
+    ...(tipo ? { kind: tipo } : {}),
+    reactors: reacoes.map((r) => texto(r?.actor)).filter(Boolean),
+    ...(emoji ? { reaction: emoji } : {}),
   };
 }
 
@@ -150,7 +293,31 @@ export function detectSelfName(drafts: ConversationDraft[]): string | null {
   return maior * 2 > drafts.length ? melhor : null;
 }
 
-/** Extrai o @ do nome da pasta, quando ele bate com um @ que já conhecemos. */
+/**
+ * Extrai o @ do nome da pasta, nas poucas vezes em que dá.
+ *
+ * ## O que o nome da pasta é de verdade (medido em 20/08/2026)
+ *
+ * Este comentário dizia que a pasta era "o @ sem os pontos". **Está errado**, e
+ * a medição contra o export real do dono é direta: em **1.480 de 1.573**
+ * conversas a pasta é o *título* da conversa achatado — sem acento, sem espaço,
+ * minúsculo. O @ não aparece em lugar nenhum do arquivo de mensagens.
+ *
+ * A consequência é dura e não tem contorno neste export: **não dá para ligar
+ * conversa a perfil**. Só 49 pastas coincidem com um @ conhecido, e coincidem
+ * porque aquelas pessoas usam o @ como nome de exibição. Ligar pelo nome também
+ * não é possível: as listas de seguidores do export JSON vêm **sem nome de
+ * exibição** — 0 de 1.361 contas têm o campo preenchido. Não há chave comum
+ * entre os dois lados.
+ *
+ * Por isso a comparação continua literal. Uma tentativa de normalizar mais (por
+ * exemplo, ignorar pontos) foi escrita e desfeita no mesmo dia: ela ganhava 9
+ * links e cada um deles seria um palpite baseado em nome de exibição, que é
+ * exatamente o jeito de mandar o usuário ao perfil de um estranho.
+ *
+ * Quem não ganha `username` não fica sem saída: a tela oferece buscar o nome no
+ * Instagram, que é o que a pessoa faria de qualquer forma.
+ */
 function usernameDaPasta(folder: string, conhecidos: ReadonlySet<string>): string | undefined {
   const semId = folder.replace(/_\d+$/, '').toLowerCase();
   if (!semId || /^\d+$/.test(semId)) return undefined;
@@ -174,6 +341,23 @@ export function summarizeConversations(
     const nome = d.title || outros[0] || d.participants[0] || 'Conversa';
     const username = usernameDaPasta(d.folder, knownUsernames);
 
+    const lastMessages = d.lastMessages.map((m): MessagePreview => {
+      const reagiuVoce = self !== null && m.reactors.includes(self);
+      return {
+        fromYou: self !== null && m.sender === self,
+        at: m.at,
+        text: m.text,
+        ...(m.kind ? { kind: m.kind } : {}),
+        // O nome de quem reagiu fica no rascunho e morre aqui: para a tela basta
+        // o emoji, e guardar a lista seria guardar mais gente do que a conversa
+        // precisa.
+        ...(m.reaction ? { reaction: m.reaction } : {}),
+        ...(reagiuVoce ? { reactedByYou: true } : {}),
+      };
+    });
+
+    const ultima = lastMessages[0];
+
     return {
       with: nome,
       ...(username ? { username } : {}),
@@ -183,9 +367,16 @@ export function summarizeConversations(
        * Sem saber quem é você, `awaitingYou` seria chute — e o chute aqui produz
        * uma lista de "você não respondeu" cheia de conversas que você respondeu.
        * Melhor a lista vir vazia e a tela explicar do que vir errada.
+       *
+       * Reagir conta como responder: ver `awaitingYou` na interface.
        */
-      awaitingYou: self !== null && d.lastSender !== '' && d.lastSender !== self,
+      awaitingYou:
+        self !== null &&
+        d.lastSender !== '' &&
+        d.lastSender !== self &&
+        !(ultima?.reactedByYou ?? false),
       messageCount: d.messageCount,
+      lastMessages,
     };
   });
 

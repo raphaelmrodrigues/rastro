@@ -269,6 +269,45 @@ quebras de linha achatadas. Nada disso afrouxa a regra 5: o schema continua
 `.strict()`, o `detail` de `ParseWarning` continua fora, e o teste que trava isso
 continua no lugar.
 
+**Conversas e a data de quem saiu (20/08/2026).** Primeiro uso de verdade do
+app com o export completo, e três coisas vieram junto:
+
+- **A data de "Deixaram de seguir" não é a data da saída, e o texto mentia.** O
+  export não registra quando alguém deixou de seguir; o app só sabe a janela
+  entre dois arquivos. Quando os dois imports caem no mesmo dia a janela colapsa
+  e `describeEvent` escrevia "saiu em 20 de ago." — que lê como data exata, e
+  ainda por cima é a data do import, então a lista inteira aparecia com a data de
+  hoje. Agora diz "saiu entre suas duas atualizações de <dia>".
+- **Perfil que não abre é informação, não defeito.** Conta apagada, banida ou que
+  trocou de @ some da lista sem ninguém ter deixado de seguir. A lista de quem
+  saiu diz isso agora, e passou a mostrar o aviso de `diff.reliability`, que
+  existia só no painel — o CLAUDE.md sempre mandou não imprimir os nomes sem ele,
+  e quem entra direto pelo menu nunca passava pelo painel.
+- **Reagir com emoji conta como responder.** A reação não é mensagem: ela vive
+  dentro da mensagem que responde, em `reactions[]`. Olhar só `sender_name` da
+  última mensagem cobrava como não respondida a conversa respondida com ❤️ — 44
+  conversas no export do dono.
+
+**Prévia de mensagem, e o limite novo (20/08/2026).** Por decisão do dono, o
+`ActivityData` passou a guardar **as duas últimas mensagens de cada conversa**,
+truncadas em 140 caracteres. Antes nenhum texto de mensagem atravessava, e a
+mudança é real: o app agora persiste pedaço de conversa privada no aparelho.
+
+O que segura a decisão: `ActivityData` fica em `atividade.json`, no aparelho, e
+**não tem caminho de subida para a API** — some junto com o resto em
+`eraseEverything`. Mídia vira rótulo, nunca arquivo nem link. Da reação sobram o
+emoji e um booleano; o nome de quem reagiu morre no rascunho. Se algum dia
+alguém quiser mandar `ActivityData` para o servidor, a conversa recomeça do
+zero, porque a partir daí o que sobe deixa de ser lista de @ e passa a ser DM.
+
+**Conversa não liga a perfil, e não é bug (20/08/2026).** O arquivo de conversa
+não traz @ nenhum, o nome da pasta é o `title` achatado (1.480 de 1.573) e as
+listas de seguidores vêm **sem** nome de exibição (0 de 1.361). Não há coluna em
+comum entre os dois lados. Normalizar mais — ignorar pontos, por exemplo — foi
+tentado e desfeito no mesmo dia: ganhava 9 links e cada um seria palpite sobre
+nome de exibição. Onde não há @, a linha abre a **busca** do Instagram pelo nome.
+Detalhes e números em `docs/EXPORT-INSTAGRAM.md`.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 
