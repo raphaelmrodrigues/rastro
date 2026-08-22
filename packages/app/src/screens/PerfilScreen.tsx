@@ -35,6 +35,10 @@ interface Props {
   onAbrirSobreArquivo: () => void;
   onCriarConta: () => void;
   onEntrar: () => void;
+  /** Abre a tela da API oficial do Instagram. Ver ConectarInstagramScreen. */
+  onAbrirModoConectado: () => void;
+  /** Abre a caixa fantasma. Ver CaixaFantasmaScreen. */
+  onAbrirCaixaFantasma: () => void;
 }
 
 export function PerfilScreen({
@@ -44,6 +48,8 @@ export function PerfilScreen({
   onAbrirSobreArquivo,
   onCriarConta,
   onEntrar,
+  onAbrirModoConectado,
+  onAbrirCaixaFantasma,
 }: Props) {
   const {
     conectado,
@@ -166,6 +172,14 @@ export function PerfilScreen({
       <SectionTitle>Seus dados</SectionTitle>
       <MenuRow label="Enviar um arquivo novo" onPress={onImportar} />
       <MenuRow label="Como conseguir o arquivo" onPress={onAbrirSobreArquivo} />
+      {/*
+       * O modo conectado mora aqui, e não numa aba própria, porque ele é um
+       * acréscimo: responde "quantos" sozinho, todo dia, e nunca vai responder
+       * "quem". Dar a ele o mesmo peso do import faria o app parecer prometer
+       * a lista nominal sem arquivo — que é justamente o que ele não faz.
+       */}
+      <MenuRow label="Conectar ao Instagram (só números)" onPress={onAbrirModoConectado} />
+      <MenuRow label="Caixa fantasma" onPress={onAbrirCaixaFantasma} />
 
       <View style={s.promessa}>
         <IconeEscudo size={20} />

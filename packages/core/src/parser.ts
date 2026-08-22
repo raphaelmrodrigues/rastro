@@ -73,6 +73,64 @@ const FILE_MAP: Array<{ kind: RelationshipKind; matches: (name: string) => boole
 export const RELEVANT_EXPORT_FILE =
   /(followers_\d+|following|pending_follow_requests|recently_unfollowed_profiles|blocked_profiles|close_friends|restricted_profiles)\.(json|html)$/;
 
+/**
+ * Arquivo que diz quando a conta nasceu.
+ *
+ * Não entra em `RELEVANT_EXPORT_FILE` porque não é lista de relação: dele sai um
+ * número só, usado para desconfiar de export recortado (ver completeness.ts).
+ * Vem na categoria "Informações de segurança e login" do pedido de export, que é
+ * opcional — sem ela a vistoria perde essa camada e as outras continuam.
+ *
+ * Só JSON: a leitura é por forma dos números, e no HTML eles vêm dentro de texto
+ * formatado. Aceitar `.html` aqui devolveria `undefined` de qualquer jeito, com a
+ * aparência de ter tentado.
+ */
+export const ACCOUNT_META_FILE = /signup_details\.json$/;
+
+/** Antes disto o Instagram não existia; depois de agora, é lixo ou fuso invertido. */
+const PRIMEIRO_EPOCH_PLAUSIVEL = Date.UTC(2010, 0, 1) / 1000;
+
+/**
+ * A data de criação da conta, do menor epoch plausível que o arquivo contiver.
+ *
+ * Busca por forma (número que parece epoch em segundos), não por rótulo: o rótulo
+ * do export é localizado — "Hora", "Time", e no português ainda chega com
+ * mojibake — e casar por nome quebra na primeira conta em outro idioma. Nenhuma
+ * string do arquivo é lida: ele guarda IP, e-mail e telefone, e aqui só passam
+ * números.
+ */
+export function readAccountCreatedAt(raw: unknown, now = Date.now()): number | undefined {
+  const teto = Math.floor(now / 1000);
+  let menor: number | undefined;
+
+  const visitar = (valor: unknown, profundidade: number): void => {
+    if (profundidade > 8) return;
+    if (typeof valor === 'number') {
+      if (
+        Number.isFinite(valor) &&
+        valor >= PRIMEIRO_EPOCH_PLAUSIVEL &&
+        valor <= teto &&
+        (menor === undefined || valor < menor)
+      ) {
+        menor = valor;
+      }
+      return;
+    }
+    if (Array.isArray(valor)) {
+      for (const item of valor) visitar(item, profundidade + 1);
+      return;
+    }
+    if (valor && typeof valor === 'object') {
+      for (const item of Object.values(valor as Record<string, unknown>)) {
+        visitar(item, profundidade + 1);
+      }
+    }
+  };
+
+  visitar(raw, 0);
+  return menor === undefined ? undefined : menor * 1000;
+}
+
 const EMPTY_RELATIONSHIPS = (): Record<RelationshipKind, Relationship[]> => ({
   followers: [],
   following: [],
@@ -269,9 +327,16 @@ export function parseExport(input: ParseInput): Snapshot {
   /** O HTML declara quando o export foi gerado; o JSON não diz. */
   let detectedExportedAt: number | undefined;
   let dataWindow: { from: number; to: number } | undefined;
+  /** Ver ACCOUNT_META_FILE. Ausente quando o export não trouxe a categoria. */
+  let accountCreatedAt: number | undefined;
 
   for (const [file, raw] of Object.entries(files)) {
     const normalized = file.replace(/\\/g, '/');
+    if (ACCOUNT_META_FILE.test(normalized)) {
+      accountCreatedAt = readAccountCreatedAt(raw);
+      continue;
+    }
+
     const target = FILE_MAP.find((m) => m.matches(normalized));
     if (!target) continue;
 
@@ -374,6 +439,7 @@ export function parseExport(input: ParseInput): Snapshot {
       : {}),
     ...(format ? { format } : {}),
     ...(dataWindow ? { dataWindow } : {}),
+    ...(accountCreatedAt !== undefined ? { accountCreatedAt } : {}),
     relationships,
     warnings,
   };

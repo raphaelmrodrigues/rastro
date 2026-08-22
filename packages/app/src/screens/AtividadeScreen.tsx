@@ -31,6 +31,10 @@ export function AtividadeScreen({ atividade, onAbrir, onComoConseguir }: Props) 
   if (!atividade) return <Convite onComoConseguir={onComoConseguir} />;
 
   const pendentes = atividade.conversations.filter((c) => c.awaitingYou).length;
+  // `?? false` porque os dois campos entraram em 21/08/2026: o `atividade.json`
+  // de quem importou antes não os tem. Ver `completar` em lib/storage.ts.
+  const nuncaRespondi = atividade.conversations.filter((c) => c.neverReplied ?? false).length;
+  const solicitacoes = atividade.conversations.filter((c) => c.isRequest ?? false).length;
   const anunciantes = atividade.advertisers.reduce((s, g) => s + g.advertisers.length, 0);
 
   return (
@@ -45,6 +49,25 @@ export function AtividadeScreen({ atividade, onAbrir, onComoConseguir }: Props) 
         value={formatNumber(pendentes)}
         onPress={() => onAbrir('nao-respondidas')}
       />
+      {/*
+       * "Nunca respondeu" vem logo abaixo de "não respondeu" porque é o recorte
+       * pequeno do mesmo problema: no arquivo do dono são 28 contra 647. A lista
+       * grande é um inventário; esta é uma tarefa que cabe numa tarde.
+       */}
+      {nuncaRespondi > 0 ? (
+        <MenuRow
+          label="Você nunca respondeu"
+          value={formatNumber(nuncaRespondi)}
+          onPress={() => onAbrir('nunca-respondi')}
+        />
+      ) : null}
+      {solicitacoes > 0 ? (
+        <MenuRow
+          label="Pedidos de mensagem"
+          value={formatNumber(solicitacoes)}
+          onPress={() => onAbrir('solicitacoes')}
+        />
+      ) : null}
       <MenuRow
         label="Todas as conversas"
         value={formatNumber(atividade.conversations.length)}
@@ -96,8 +119,9 @@ export function AtividadeScreen({ atividade, onAbrir, onComoConseguir }: Props) 
       <View style={s.promessa}>
         <IconeEscudo size={20} />
         <Text style={s.promessaTexto}>
-          Nada disso sai do seu aparelho. O texto das suas conversas não é guardado em lugar
-          nenhum — o app lê, conta quem falou por último e descarta.
+          Nada disso sai do seu aparelho, nem para a sua conta do Rastro. Das conversas ficam
+          guardadas as duas últimas mensagens de cada uma, para a lista dizer do que era —
+          o resto o app lê, conta e descarta.
         </Text>
       </View>
     </ScrollView>

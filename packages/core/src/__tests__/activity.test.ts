@@ -18,6 +18,7 @@ import {
   readConversation,
   summarizeConversations,
   TAMANHO_DA_PREVIA,
+  isMessageRequest,
   type ConversationDraft,
 } from '../activity.js';
 
@@ -463,5 +464,113 @@ describe('conversationFolder', () => {
       'ana_123',
     );
     expect(conversationFolder('outro/caminho.json')).toBe('');
+  });
+});
+
+/*
+ * As duas listas que substituíram o pedido impossível de "não visualizei".
+ * Ver docs/EXPORT-INSTAGRAM.md: não existe status de leitura no export.
+ */
+describe('neverReplied e isRequest', () => {
+  const soEla = {
+    participants: [{ name: 'Ana' }, { name: EU }],
+    messages: [
+      { sender_name: 'Ana', timestamp_ms: 2 },
+      { sender_name: 'Ana', timestamp_ms: 1 },
+    ],
+    title: 'Ana',
+  };
+
+  /*
+   * `detectSelfName` precisa de um lote: quem é você se descobre por repetição
+   * entre conversas, e com uma só ele devolve `null` — de propósito. Estas
+   * conversas de apoio existem para o teste medir `neverReplied`, e não a
+   * detecção do dono da conta, que tem testes próprios acima.
+   */
+  const comLote = (alvo: ConversationDraft) =>
+    // Por `with`, e não por índice: `summarizeConversations` ordena por data, e
+    // as conversas de apoio são mais recentes que o alvo.
+    summarizeConversations([
+      alvo,
+      readConversation(conversa('Bruno', [[EU, 9]]), 'bruno_1')!,
+      readConversation(conversa('Carla', [[EU, 8]]), 'carla_1')!,
+    ]).conversations.find((c) => c.with === 'Ana')!;
+
+  it('marca como nunca respondida a conversa em que você nunca falou', () => {
+    expect(comLote(readConversation(soEla, 'ana_1')!).neverReplied).toBe(true);
+  });
+
+  it('não marca conversa em que você falou, mesmo sem ter falado por último', () => {
+    const resumo = comLote(
+      readConversation(conversa('Ana', [['Ana', 3], [EU, 2], ['Ana', 1]]), 'ana_1')!,
+    );
+    // A bola está com você, mas você já respondeu alguma vez.
+    expect(resumo.awaitingYou).toBe(true);
+    expect(resumo.neverReplied).toBe(false);
+  });
+
+  it('coleta remetentes de TODAS as mensagens, não só das duas guardadas', () => {
+    // A prévia guarda duas; se `senders` viesse dela, uma conversa antiga em que
+    // você falou no começo apareceria como nunca respondida.
+    const longa = {
+      participants: [{ name: 'Ana' }, { name: EU }],
+      messages: [
+        { sender_name: 'Ana', timestamp_ms: 5 },
+        { sender_name: 'Ana', timestamp_ms: 4 },
+        { sender_name: 'Ana', timestamp_ms: 3 },
+        { sender_name: EU, timestamp_ms: 2 },
+      ],
+      title: 'Ana',
+    };
+    const d = readConversation(longa, 'ana_1');
+    expect(d?.senders).toContain(EU);
+    expect(comLote(d!).neverReplied).toBe(false);
+  });
+
+  it('sem saber quem é você, ninguém é acusado de nunca ter respondido', () => {
+    const d = readConversation(soEla, 'ana_1');
+    // Uma conversa só: `detectSelfName` não tem como decidir quem se repete.
+    const { self, conversations } = summarizeConversations([d!]);
+    if (self === null) expect(conversations[0]?.neverReplied).toBe(false);
+  });
+
+  it('propaga a marca de solicitação até o resumo', () => {
+    const d = readConversation(soEla, 'ana_1', { isRequest: true });
+    expect(d?.isRequest).toBe(true);
+    expect(summarizeConversations([d!]).conversations[0]?.isRequest).toBe(true);
+  });
+
+  it('a conversa comum não é solicitação', () => {
+    expect(readConversation(soEla, 'ana_1')?.isRequest).toBe(false);
+  });
+});
+
+describe('as duas caixas de mensagem', () => {
+  const REQ = 'your_instagram_activity/messages/message_requests/ana_123/message_1.json';
+  const INBOX = 'your_instagram_activity/messages/inbox/ana_123/message_1.json';
+  // Nome de pasta longo faz o Instagram truncar o caminho inteiro. Acontece uma
+  // vez no export real, e o padrão antigo descartava essa conversa em silêncio.
+  const TRUNCADO =
+    'your_instagram_activity/messages/inbox/umnomedepastaabsurdamentelongoquefoicortado_839/messa.json';
+
+  it('lê solicitações, que antes eram invisíveis para o app', () => {
+    expect(isActivityFile(REQ)).toBe(true);
+    expect(conversationFolder(REQ)).toBe('ana_123');
+    expect(isMessageRequest(REQ)).toBe(true);
+    expect(isMessageRequest(INBOX)).toBe(false);
+  });
+
+  it('lê a conversa cujo nome de arquivo o Instagram truncou', () => {
+    expect(isActivityFile(TRUNCADO)).toBe(true);
+    expect(conversationFolder(TRUNCADO)).toBe('umnomedepastaabsurdamentelongoquefoicortado_839');
+  });
+
+  it('continua recusando a mídia que mora dentro da pasta da conversa', () => {
+    expect(isActivityFile('your_instagram_activity/messages/inbox/ana_123/photos/foto.jpg')).toBe(
+      false,
+    );
+    expect(
+      isActivityFile('your_instagram_activity/messages/message_requests/ana_123/audio/a.mp4'),
+    ).toBe(false);
   });
 });

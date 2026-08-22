@@ -166,6 +166,11 @@ function completar(bruto: unknown): ActivityData | null {
       ...c,
       // O campo que faltava. Sem ele a lista de conversas não abre.
       lastMessages: lista(c.lastMessages),
+      // Chegaram em 21/08/2026, junto com a caixa de solicitações. `false` é a
+      // leitura certa do arquivo antigo: ele não distinguia as duas caixas, e
+      // marcar tudo como solicitação encheria a aba nova de conversa comum.
+      neverReplied: c.neverReplied === true,
+      isRequest: c.isRequest === true,
     })),
     commentedOn: lista(d.commentedOn),
     advertisers: lista(d.advertisers),

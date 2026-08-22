@@ -63,6 +63,17 @@ export interface Snapshot {
    * janelas diferentes não são comparáveis — ver `SnapshotDiff.reliability`.
    */
   dataWindow?: { from: number; to: number };
+  /**
+   * Quando a conta do Instagram foi criada, em ms UTC.
+   *
+   * Vem de `signup_details.json`, e só quando o export incluiu a categoria de
+   * segurança e login. Serve a um propósito só: comparar com a data da relação
+   * mais antiga do arquivo para desconfiar de export recortado — ver
+   * `completeness.ts`. Do arquivo de origem nada mais é lido: ele traz IP,
+   * e-mail e telefone, e ler dado sensível "porque estava lá" é como um app vira
+   * notícia ruim.
+   */
+  accountCreatedAt?: number;
   relationships: Record<RelationshipKind, Relationship[]>;
   /** Problemas não-fatais encontrados no parsing. Nunca engolir em silêncio. */
   warnings: ParseWarning[];

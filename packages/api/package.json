@@ -19,6 +19,7 @@
     "@rastro/core": "*",
     "fastify": "^5.0.0",
     "postgres": "^3.4.0",
+    "tweetnacl": "^1.0.3",
     "unzipper": "^0.12.0",
     "zod": "^3.23.0"
   },

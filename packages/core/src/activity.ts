@@ -109,6 +109,26 @@ export interface ConversationSummary {
    * respondido do jeito mais comum no Instagram.
    */
   awaitingYou: boolean;
+  /**
+   * Você nunca mandou nada nesta conversa.
+   *
+   * É o mais perto que o export chega de "não abri". Não existe status de
+   * leitura em lugar nenhum do arquivo — nem no JSON, nem no HTML, nem em
+   * campo escondido: as chaves de mensagem foram varridas em 21/08/2026 e a
+   * lista inteira está em docs/EXPORT-INSTAGRAM.md. O Instagram sabe (é o
+   * "visto"), e não exporta.
+   *
+   * No export do dono são 28 conversas assim, contra 647 de `awaitingYou`. A
+   * diferença importa: 647 é uma lista que ninguém encara, 28 é uma tarefa.
+   */
+  neverReplied: boolean;
+  /**
+   * Veio de `messages/message_requests/`, a caixa separada de quem não te segue.
+   *
+   * São as que o Instagram esconde atrás de "Solicitações", e por isso as que
+   * de fato costumam nunca ter sido abertas.
+   */
+  isRequest: boolean;
   messageCount: number;
   /** As últimas mensagens, da mais nova para a mais antiga. Ver o topo do arquivo. */
   lastMessages: MessagePreview[];
@@ -134,6 +154,17 @@ export interface ConversationDraft {
   lastSender: string;
   messageCount: number;
   lastMessages: MessageDraft[];
+  /**
+   * Quem falou alguma vez nesta conversa, sem repetição.
+   *
+   * Guardado no rascunho porque quem é "você" só se descobre depois, olhando
+   * todas as conversas juntas — e voltar às 54 mil mensagens para responder
+   * isso custaria uma segunda passagem pelo zip. São um a três nomes por
+   * conversa; o texto das mensagens continua morrendo aqui.
+   */
+  senders: string[];
+  /** Veio de `message_requests/`. Ver ConversationSummary.isRequest. */
+  isRequest: boolean;
 }
 
 interface RawReaction {
@@ -168,7 +199,11 @@ const texto = (v: unknown): string => (typeof v === 'string' ? repairMojibake(v)
  * arquivo não tem o que interessa — nunca lança: um formato novo em uma conversa
  * não pode derrubar as outras 1.581.
  */
-export function readConversation(json: unknown, folder: string): ConversationDraft | null {
+export function readConversation(
+  json: unknown,
+  folder: string,
+  options: { isRequest?: boolean } = {},
+): ConversationDraft | null {
   const raw = json as RawConversation;
   const mensagens = Array.isArray(raw?.messages) ? raw.messages : [];
   if (mensagens.length === 0) return null;
@@ -186,7 +221,10 @@ export function readConversation(json: unknown, folder: string): ConversationDra
    */
   const maisNovas: RawMessage[] = [];
   const quandoDelas: number[] = [];
+  const senders = new Set<string>();
   for (const m of mensagens) {
+    const remetente = texto(m?.sender_name);
+    if (remetente) senders.add(remetente);
     const t = quando(m);
     let i = 0;
     while (i < maisNovas.length && quandoDelas[i]! >= t) i++;
@@ -213,6 +251,8 @@ export function readConversation(json: unknown, folder: string): ConversationDra
     lastSender: lastMessages[0]?.sender ?? '',
     messageCount: mensagens.length,
     lastMessages,
+    senders: [...senders],
+    isRequest: options.isRequest ?? false,
   };
 }
 
@@ -375,6 +415,17 @@ export function summarizeConversations(
         d.lastSender !== '' &&
         d.lastSender !== self &&
         !(ultima?.reactedByYou ?? false),
+      /*
+       * "Nunca respondi" é o recorte que o usuário pediu quando perguntou por
+       * "não visualizei". Não é a mesma coisa, e a tela não pode fingir que é:
+       * o export não guarda leitura. Mas responde à intenção — conversa em que
+       * a outra pessoa falou e você nunca disse nada de volta.
+       *
+       * Depende de `self` pelo mesmo motivo que `awaitingYou`: sem saber quem é
+       * você, todo mundo "nunca respondeu".
+       */
+      neverReplied: self !== null && d.senders.length > 0 && !d.senders.includes(self),
+      isRequest: d.isRequest,
       messageCount: d.messageCount,
       lastMessages,
     };
@@ -546,6 +597,17 @@ export interface ActivityData {
 }
 
 /**
+ * Um arquivo de conversa, nas duas caixas que o export separa.
+ *
+ * O nome do arquivo não é exigido ser `message_N.json`: quando o nome da pasta
+ * fica muito longo o Instagram trunca o caminho inteiro e o arquivo chega como
+ * `messa.json` — acontece uma vez no export real, e o padrão antigo descartava
+ * essa conversa em silêncio. Dentro da pasta de uma conversa só existem os JSON
+ * dela e a mídia, então aceitar qualquer `.json` ali é seguro.
+ */
+const CONVERSA = /messages\/(inbox|message_requests)\/[^/]+\/[^/]*\.json$/;
+
+/**
  * Nomes dos arquivos que este módulo consome.
  *
  * Deliberadamente restrito. O export completo traz também histórico de login com
@@ -555,7 +617,7 @@ export interface ActivityData {
  */
 export function isActivityFile(nome: string): boolean {
   return (
-    /messages\/inbox\/[^/]+\/message_\d+\.json$/.test(nome) ||
+    CONVERSA.test(nome) ||
     /comments\/(post_comments_\d+|reels_comments)\.json$/.test(nome) ||
     /advertisers_using_your_activity_or_information\.json$/.test(nome) ||
     /recent_searches\/profile_searches\.json$/.test(nome)
@@ -564,5 +626,15 @@ export function isActivityFile(nome: string): boolean {
 
 /** A pasta da conversa, para tentar recuperar o @. */
 export function conversationFolder(caminho: string): string {
-  return caminho.match(/messages\/inbox\/([^/]+)\//)?.[1] ?? '';
+  return caminho.match(/messages\/(?:inbox|message_requests)\/([^/]+)\//)?.[1] ?? '';
+}
+
+/**
+ * A conversa veio da caixa de solicitações.
+ *
+ * São 41 arquivos no export do dono contra 4.018 do inbox — e é lá que mora a
+ * mensagem que ninguém abriu, porque o Instagram não a mostra na lista normal.
+ */
+export function isMessageRequest(caminho: string): boolean {
+  return /messages\/message_requests\//.test(caminho);
 }

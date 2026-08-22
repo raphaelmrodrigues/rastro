@@ -30,6 +30,8 @@ import { abrirPerfil, buscarNoInstagram } from '../lib/perfil';
 
 export type ListaDeAtividade =
   | 'nao-respondidas'
+  | 'nunca-respondi'
+  | 'solicitacoes'
   | 'conversas'
   | 'comentei'
   | 'anunciantes'
@@ -45,6 +47,30 @@ export const TITULOS_ATIVIDADE: Record<
       'Conversas em que a última mensagem é da outra pessoa e você não respondeu nem reagiu. ' +
       'Reagir com emoji conta como resposta.',
     vazio: 'Nenhuma conversa esperando por você. Caixa de entrada em dia.',
+  },
+  /*
+   * As duas listas abaixo existem porque "quem eu não visualizei" foi pedido e
+   * não é possível: o arquivo do Instagram não guarda status de leitura em
+   * lugar nenhum — nem no JSON, nem no HTML, nem em campo escondido. As chaves
+   * de mensagem foram varridas em 21/08/2026 e estão em docs/EXPORT-INSTAGRAM.md.
+   *
+   * Estas são as duas aproximações que a fonte permite, e a explicação de cada
+   * uma diz o que ela é de verdade. Nenhuma promete "não visto".
+   */
+  'nunca-respondi': {
+    title: 'Você nunca respondeu',
+    explicacao:
+      'Conversas em que a outra pessoa falou e você nunca mandou nada — nem uma ' +
+      'mensagem, nem antes. O arquivo do Instagram não registra o que você abriu ' +
+      'ou deixou de abrir, então esta é a lista mais próxima disso que dá para montar.',
+    vazio: 'Você respondeu, em algum momento, todas as conversas do seu arquivo.',
+  },
+  solicitacoes: {
+    title: 'Pedidos de mensagem',
+    explicacao:
+      'Mensagens de quem não te segue. O Instagram guarda essas conversas numa ' +
+      'caixa separada, atrás de "Solicitações" — é onde ficam as que ninguém abre.',
+    vazio: 'Nenhum pedido de mensagem no seu arquivo.',
   },
   conversas: {
     title: 'Todas as conversas',
@@ -145,6 +171,14 @@ function toItems(lista: ListaDeAtividade, a: ActivityData): Item[] {
   switch (lista) {
     case 'nao-respondidas':
       return a.conversations.filter((c) => c.awaitingYou).map(daConversa);
+
+    // `?? false` nas duas: são campos de 21/08/2026, e o `atividade.json` de
+    // quem importou antes não os tem. Ver `completar` em lib/storage.ts.
+    case 'nunca-respondi':
+      return a.conversations.filter((c) => c.neverReplied ?? false).map(daConversa);
+
+    case 'solicitacoes':
+      return a.conversations.filter((c) => c.isRequest ?? false).map(daConversa);
 
     case 'conversas':
       return a.conversations.map(daConversa);

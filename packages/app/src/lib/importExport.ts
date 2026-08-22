@@ -26,12 +26,14 @@
 import {
   conversationFolder,
   isActivityFile,
+  isMessageRequest,
   parseAdvertisers,
   parseComments,
   parseExport,
   parseProfileSearches,
   readConversation,
   summarizeConversations,
+  ACCOUNT_META_FILE,
   RELEVANT_EXPORT_FILE,
   type ActivityData,
   type ConversationDraft,
@@ -43,6 +45,13 @@ export interface ImportResult {
   snapshot: Snapshot;
   /** Quantos arquivos de lista foram encontrados. Zero significa export errado. */
   filesFound: number;
+  /**
+   * Quantos arquivos de atividade o zip trouxe.
+   *
+   * Zero é o export pedido só com "Seguidores e seguindo". Não invalida nada —
+   * é o que a vistoria usa para avisar que a aba Atividade vai ficar vazia.
+   */
+  activityFiles: number;
   /** Só existe quando o usuário pediu o export completo. */
   atividade: ActivityData | null;
 }
@@ -70,6 +79,7 @@ export async function snapshotFromZip(
   const conversas: ConversationDraft[] = [];
   let anunciantesCru: unknown = null;
   let buscasCru: unknown = null;
+  let activityFiles = 0;
 
   const lerJson = (conteudo: string): unknown => {
     try {
@@ -81,7 +91,8 @@ export async function snapshotFromZip(
 
   await extrairDoZip(
     fonte,
-    (nome) => RELEVANT_EXPORT_FILE.test(nome) || isActivityFile(nome),
+    (nome) =>
+      RELEVANT_EXPORT_FILE.test(nome) || ACCOUNT_META_FILE.test(nome) || isActivityFile(nome),
     aoProgredir,
     /*
      * Cada arquivo é tratado e descartado aqui dentro.
@@ -93,14 +104,18 @@ export async function snapshotFromZip(
      * texto some antes do arquivo seguinte.
      */
     (nome, conteudo) => {
-      if (RELEVANT_EXPORT_FILE.test(nome)) {
+      if (RELEVANT_EXPORT_FILE.test(nome) || ACCOUNT_META_FILE.test(nome)) {
         listas[nome] = conteudo;
         return;
       }
 
+      activityFiles++;
+
       const pasta = conversationFolder(nome);
       if (pasta) {
-        const draft = readConversation(lerJson(conteudo), pasta);
+        const draft = readConversation(lerJson(conteudo), pasta, {
+          isRequest: isMessageRequest(nome),
+        });
         if (draft) conversas.push(draft);
         return;
       }
@@ -130,7 +145,10 @@ export async function snapshotFromZip(
 
   return {
     snapshot,
-    filesFound: Object.keys(files).length,
+    // O arquivo de metadados não é lista: contá-lo faria um zip só com ele
+    // parecer um export válido para quem checa `filesFound`.
+    filesFound: Object.keys(files).filter((f) => !ACCOUNT_META_FILE.test(f)).length,
+    activityFiles,
     atividade: montarAtividade(snapshot, conversas, comentarios, anunciantesCru, buscasCru),
   };
 }

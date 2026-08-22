@@ -1,5 +1,7 @@
 export * from './types.js';
+export * from './base64.js';
 export * from './parser.js';
+export * from './completeness.js';
 export * from './htmlExport.js';
 export * from './diff.js';
 export * from './stats.js';

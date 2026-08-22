@@ -17,7 +17,7 @@
  * rotas respondem 503 e o resto do produto funciona igual.
  */
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -30,7 +30,9 @@ import {
 } from '@rastro/core';
 import { sql } from '../db/client.js';
 import { decryptSecret, encryptSecret } from '../lib/crypto.js';
+import { chavePublicaValida } from '../lib/cofre.js';
 import { profileBelongsTo } from '../db/snapshots.js';
+import { avisarSeCaiu } from '../lib/quedaDeSeguidores.js';
 import {
   authorizeUrl,
   exchangeCodeForToken,
@@ -110,11 +112,27 @@ export async function collectMetrics(profileId: string): Promise<{ sampled: bool
   // Amostra sem contagem é amostra falsa: gravada, vira um despencar no gráfico.
   if (!sample) return { sampled: false };
 
+  /*
+   * A contagem anterior é lida ANTES do INSERT — depois dele a "anterior" seria
+   * a de agora, e nenhuma queda seria detectada nunca.
+   */
+  const [anterior] = await sql`
+    SELECT follower_count FROM profile_metrics
+    WHERE profile_id = ${profileId}
+    ORDER BY sampled_at DESC LIMIT 1
+  `;
+
   await sql`
     INSERT INTO profile_metrics (profile_id, sampled_at, follower_count, follows_count, media_count)
     VALUES (${profileId}, ${now}, ${sample.followerCount}, ${sample.followsCount ?? null}, ${sample.mediaCount ?? null})
     ON CONFLICT (profile_id, sampled_at) DO NOTHING
   `;
+
+  // Depois de gravar, e sem `await` que possa derrubar a coleta: a série é o
+  // produto, o aviso é acessório. Ver lib/push.ts.
+  if (anterior) {
+    void avisarSeCaiu(profileId, anterior.follower_count, sample.followerCount, now);
+  }
 
   // Insights são opcionais: conta com menos de 100 seguidores não recebe a métrica,
   // e isso não é erro — é limite da fonte. A contagem acima já foi gravada.
@@ -135,6 +153,61 @@ export async function collectMetrics(profileId: string): Promise<{ sampled: bool
 
   await sql`UPDATE connected_accounts SET last_sync_at = ${now}, last_error = NULL WHERE profile_id = ${profileId}`;
   return { sampled: true };
+}
+
+/**
+ * A página que o usuário vê ao voltar do Instagram.
+ *
+ * Autocontida e minúscula de propósito: sem CSS externo, sem fonte da rede, sem
+ * script. Ela abre no navegador do celular, muitas vezes em rede ruim logo
+ * depois de uma autorização — qualquer coisa que dependa de um segundo request
+ * é uma chance a mais de a pessoa ver página quebrada e achar que falhou.
+ *
+ * As cores são as do app (`packages/app/src/lib/theme.ts`) escritas à mão. É
+ * duplicação consciente, como a do gerador de ícones: este arquivo roda no
+ * servidor e não pode importar o tema do app.
+ */
+function pagina(
+  reply: FastifyReply,
+  status: number,
+  tom: 'ok' | 'erro',
+  titulo: string,
+  corpo: string,
+): FastifyReply {
+  const cor = tom === 'ok' ? '#8B5CF6' : '#F4536A';
+  const escapar = (t: string) =>
+    t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+  return reply
+    .code(status)
+    .type('text/html; charset=utf-8')
+    .send(`<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapar(titulo)} · Rastro</title>
+<style>
+  :root { color-scheme: dark }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0B0B10; color: #F1F1F7; padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 380px; text-align: center }
+  .marca { width: 44px; height: 44px; margin: 0 auto 24px; border-radius: 14px; background: ${cor} }
+  h1 { font-size: 22px; margin: 0 0 12px; letter-spacing: -0.4px }
+  p { font-size: 15px; line-height: 1.5; color: #9B9BB0; margin: 0 }
+</style>
+</head>
+<body>
+  <main>
+    <div class="marca"></div>
+    <h1>${escapar(titulo)}</h1>
+    <p>${escapar(corpo)}</p>
+  </main>
+</body>
+</html>`);
 }
 
 export const instagramRoutes: FastifyPluginAsync = async (app) => {
@@ -180,6 +253,12 @@ export const instagramRoutes: FastifyPluginAsync = async (app) => {
    * Callback do OAuth. O Instagram redireciona o navegador para cá com `code`.
    * Não tem JWT: quem chega aqui é o navegador do usuário vindo do Instagram —
    * a autorização é provada pelo `state` que emitimos no passo anterior.
+   *
+   * **Responde HTML, não JSON.** É a única rota da API que um usuário final vê
+   * com os próprios olhos: ele sai do app, autoriza no Instagram e o navegador
+   * pousa aqui. Uma tela branca com `{"connected":true}` deixa a pessoa sem
+   * saber se deu certo nem o que fazer em seguida — e o que ela precisa fazer é
+   * justamente uma coisa que a página tem de dizer: voltar para o app.
    */
   app.get('/callback', async (req, reply) => {
     const query = z
@@ -187,16 +266,16 @@ export const instagramRoutes: FastifyPluginAsync = async (app) => {
       .safeParse(req.query);
 
     if (!query.success || !query.data.state) {
-      return reply.code(400).send({ error: 'Retorno inválido do Instagram.' });
+      return pagina(reply, 400, 'erro', 'Retorno inválido', 'O Instagram devolveu uma resposta que não reconhecemos.');
     }
     if (query.data.error || !query.data.code) {
-      return reply.code(400).send({ error: 'Autorização cancelada.' });
+      return pagina(reply, 400, 'erro', 'Autorização cancelada', 'Nada foi conectado. Você pode tentar de novo pelo app quando quiser.');
     }
 
     const pending = pendingStates.get(query.data.state);
     pendingStates.delete(query.data.state);
     if (!pending || Date.now() - pending.createdAt > STATE_TTL_MS) {
-      return reply.code(400).send({ error: 'Esta autorização expirou. Tente conectar de novo.' });
+      return pagina(reply, 400, 'erro', 'Esta autorização expirou', 'Passou tempo demais entre abrir e concluir. Volte ao app e toque em conectar de novo.');
     }
 
     try {
@@ -227,10 +306,24 @@ export const instagramRoutes: FastifyPluginAsync = async (app) => {
       `;
 
       await collectMetrics(pending.profileId);
-      return { connected: true, username: profile.username };
+      return pagina(
+        reply,
+        200,
+        'ok',
+        'Conta conectada',
+        profile.username
+          ? `O Rastro está acompanhando @${profile.username}. Pode fechar esta aba e voltar ao app.`
+          : 'Pode fechar esta aba e voltar ao app.',
+      );
     } catch (error) {
       if (error instanceof InstagramApiError) {
-        return reply.code(502).send({ error: `O Instagram recusou a conexão: ${error.message}` });
+        return pagina(
+          reply,
+          502,
+          'erro',
+          'O Instagram recusou a conexão',
+          `${error.message} Se a sua conta não for Profissional (Business ou Creator), é por isso — a conversão é gratuita e reversível nas configurações do Instagram.`,
+        );
       }
       throw error;
     }
@@ -359,6 +452,129 @@ export const instagramRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  /* ------------------------------------------------------------------ */
+  /* Conteúdo selado: chave, mensagens e comentários                     */
+
+  /**
+   * O aparelho registra a chave pública com que o servidor vai selar tudo.
+   *
+   * Sem esta chamada o webhook **descarta** os eventos, e é para descartar
+   * mesmo: guardar em claro "só até o app registrar" é como toda promessa de
+   * criptografia morre. Ver lib/cofre.ts.
+   */
+  app.put(
+    '/profiles/:profileId/key',
+    { onRequest: [async (req) => req.jwtVerify()] },
+    async (req, reply) => {
+      const { profileId } = req.params as { profileId: string };
+      const { sub } = req.user as { sub: string };
+      if (!(await profileBelongsTo(profileId, sub))) {
+        return reply.code(404).send({ error: 'Perfil não encontrado.' });
+      }
+
+      const corpo = z.object({ publicKey: z.string().min(40).max(100) }).strict().safeParse(req.body);
+      if (!corpo.success || !chavePublicaValida(corpo.data.publicKey)) {
+        return reply.code(400).send({ error: 'Chave pública inválida.' });
+      }
+
+      const [atual] = await sql`SELECT public_key FROM profile_keys WHERE profile_id = ${profileId}`;
+      const trocou = atual !== undefined && atual.public_key !== corpo.data.publicKey;
+
+      await sql`
+        INSERT INTO profile_keys (profile_id, public_key)
+        VALUES (${profileId}, ${corpo.data.publicKey})
+        ON CONFLICT (profile_id) DO UPDATE
+        SET public_key = EXCLUDED.public_key, rotated_at = now()
+      `;
+
+      /*
+       * Chave nova, histórico velho vai fora.
+       *
+       * O que foi selado para a chave anterior não abre com a nova — é o preço
+       * da ponta a ponta, e é o que acontece quando a pessoa troca de celular.
+       * Guardar bytes que ninguém mais consegue ler seria ocupar espaço com
+       * lixo indecifrável e fingir que o histórico continua lá.
+       */
+      if (trocou) {
+        await sql`DELETE FROM instagram_messages WHERE profile_id = ${profileId}`;
+        await sql`DELETE FROM instagram_comments WHERE profile_id = ${profileId}`;
+      }
+
+      return { ok: true, descartouHistorico: trocou };
+    },
+  );
+
+  /**
+   * As mensagens que chegaram desde a conexão, seladas.
+   *
+   * O servidor devolve o que não sabe ler. Quem abre é o aparelho.
+   */
+  app.get(
+    '/profiles/:profileId/messages',
+    { onRequest: [async (req) => req.jwtVerify()] },
+    async (req, reply) => {
+      const { profileId } = req.params as { profileId: string };
+      const { sub } = req.user as { sub: string };
+      if (!(await profileBelongsTo(profileId, sub))) {
+        return reply.code(404).send({ error: 'Perfil não encontrado.' });
+      }
+
+      const linhas = await sql`
+        SELECT message_id, thread_id, from_self, sent_at, payload_enc
+        FROM instagram_messages
+        WHERE profile_id = ${profileId} AND expires_at > now()
+        ORDER BY sent_at DESC
+        LIMIT 500
+      `;
+
+      return {
+        messages: linhas.map((l) => ({
+          id: l.message_id,
+          threadId: l.thread_id,
+          fromSelf: l.from_self,
+          at: new Date(l.sent_at).getTime(),
+          sealed: l.payload_enc,
+        })),
+        /** A frase que a tela não pode omitir. */
+        limitation:
+          'Só aparecem mensagens que chegaram depois de você conectar. A API do ' +
+          'Instagram não entrega conversas antigas.',
+      };
+    },
+  );
+
+  /** Comentários recebidos, selados. O espelho do que o export não traz. */
+  app.get(
+    '/profiles/:profileId/comments',
+    { onRequest: [async (req) => req.jwtVerify()] },
+    async (req, reply) => {
+      const { profileId } = req.params as { profileId: string };
+      const { sub } = req.user as { sub: string };
+      if (!(await profileBelongsTo(profileId, sub))) {
+        return reply.code(404).send({ error: 'Perfil não encontrado.' });
+      }
+
+      const linhas = await sql`
+        SELECT comment_id, media_id, parent_id, from_self, created_at, payload_enc
+        FROM instagram_comments
+        WHERE profile_id = ${profileId} AND expires_at > now()
+        ORDER BY created_at DESC
+        LIMIT 500
+      `;
+
+      return {
+        comments: linhas.map((l) => ({
+          id: l.comment_id,
+          mediaId: l.media_id,
+          parentId: l.parent_id,
+          fromSelf: l.from_self,
+          at: new Date(l.created_at).getTime(),
+          sealed: l.payload_enc,
+        })),
+      };
+    },
+  );
+
   /** Desconectar: apaga o token. As métricas já coletadas ficam com o usuário. */
   app.delete(
     '/profiles/:profileId/connect',
@@ -371,6 +587,13 @@ export const instagramRoutes: FastifyPluginAsync = async (app) => {
       }
 
       await sql`DELETE FROM connected_accounts WHERE profile_id = ${profileId}`;
+      /*
+       * Desconectar apaga o conteúdo junto. As métricas são números do próprio
+       * usuário e ficam; mensagem e comentário são conversa de outras pessoas,
+       * e não há motivo para sobreviverem ao fim da autorização que os trouxe.
+       */
+      await sql`DELETE FROM instagram_messages WHERE profile_id = ${profileId}`;
+      await sql`DELETE FROM instagram_comments WHERE profile_id = ${profileId}`;
       return reply.code(204).send();
     },
   );

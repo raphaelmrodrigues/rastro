@@ -12,13 +12,27 @@
  *  - não pede, recebe ou guarda a senha do usuário (regra 1 do CLAUDE.md);
  *  - não usa `i.instagram.com`, nem endpoints de app móvel, nem cookie de sessão,
  *    nem qualquer coisa que exija `instagram-private-api` (regra 2);
- *  - não segue, deixa de seguir, curte, comenta nem manda mensagem (regra 4);
+ *  - não segue, deixa de seguir, curte, comenta nem manda mensagem (regra 4),
+ *    mesmo tendo escopo que permitiria comentar e responder DM;
  *  - não tem como listar seguidores, porque a API oficial não expõe isso.
  *
- * Esse último ponto é o que define o modo conectado inteiro: daqui saem números,
- * nunca nomes. Se algum dia alguém "resolver" essa limitação, terá trocado a API
- * oficial por API privada, e o preço é o banimento da conta do usuário — não da
- * nossa. Ver packages/core/src/metrics.ts.
+ * Esse último ponto é o que define o modo conectado: **a lista de seguidores não
+ * existe nesta API**, para ninguém. Daqui saem números, nunca nomes de quem
+ * entrou ou saiu. Se algum dia alguém "resolver" essa limitação, terá trocado a
+ * API oficial por API privada, e o preço é o banimento da conta do usuário — não
+ * da nossa. Ver packages/core/src/metrics.ts.
+ *
+ * ## O que mudou em 22/08/2026
+ *
+ * Entraram os escopos de comentários e mensagens, por decisão do dono. Com eles
+ * chegam **nomes**, mas de outra coisa: quem comentou no seu post, quem te
+ * mandou DM. Isso não contradiz o parágrafo acima — continua não existindo lista
+ * de seguidores — e não afrouxa a regra 4: os dois escopos autorizam responder,
+ * ocultar e apagar, e **nada neste arquivo faz isso**. Só leitura.
+ *
+ * Esse conteúdo não passa por aqui: ele chega pelo webhook
+ * (`routes/instagramWebhook.ts`) e é selado com a chave pública do aparelho
+ * antes de tocar no banco. O servidor guarda sem poder ler — ver `lib/cofre.ts`.
  *
  * Documentação: https://developers.facebook.com/docs/instagram-platform
  */
@@ -29,10 +43,27 @@ const OAUTH_TOKEN = 'https://api.instagram.com/oauth/access_token';
 const API_VERSION = process.env.INSTAGRAM_API_VERSION ?? 'v23.0';
 
 /**
- * Escopos pedidos. O mínimo necessário para contagem e insights de audiência —
- * nada de publicação, mensagens ou comentários, que o app não usa.
+ * Escopos pedidos.
+ *
+ * Os dois primeiros são o modo conectado original: contagem e insights. Os dois
+ * últimos entraram em 22/08/2026, por decisão do dono, para as telas de
+ * comentários recebidos e de mensagens sem marcar como vista.
+ *
+ * **O que continua fora, e não é por esquecimento:**
+ * `instagram_business_content_publish`. Publicar é ação na conta do usuário —
+ * regra 4 do CLAUDE.md, a mesma que recusou o unfollow em massa.
+ *
+ * E os dois últimos autorizam mais do que usamos: a API deixa responder, ocultar
+ * e apagar comentário e mensagem. **Nenhuma função deste projeto faz isso.** Se
+ * um dia aparecer aqui uma chamada de escrita, ela nasceu de um pedido que a
+ * regra 4 recusa — não de uma necessidade técnica.
  */
-export const SCOPES = ['instagram_business_basic', 'instagram_business_manage_insights'] as const;
+export const SCOPES = [
+  'instagram_business_basic',
+  'instagram_business_manage_insights',
+  'instagram_business_manage_comments',
+  'instagram_business_manage_messages',
+] as const;
 
 export class InstagramApiError extends Error {
   constructor(

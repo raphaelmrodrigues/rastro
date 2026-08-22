@@ -395,6 +395,144 @@ espaço real. O aviso mostra só o **nome** do arquivo: um `content://` do Andro
 não tem caminho de sistema que se possa exibir, e inventar um mandaria a pessoa
 procurar onde não está.
 
+**A vistoria do arquivo, e o que ela pode provar (21/08/2026).** O dono pediu para
+**impedir** o import de export incompleto. Agora há `checkExport()`
+(`core/src/completeness.ts`), que roda **depois do parsing e antes de gravar** —
+a única ordem que serve, porque um snapshot recortado, uma vez salvo, vira a base
+de comparação do próximo.
+
+Os números que justificam a existência dela, medidos no mesmo perfil no mesmo dia:
+**1.361 seguidores** pedindo "Todo o período", **222** pedindo 12 meses. E a lista
+de *seguindo* veio quase completa no arquivo recortado (1.158 de 1.157), então "as
+duas listas encolheram junto" não serve como sinal.
+
+Cada problema carrega a severidade que a evidência banca, e a distinção é o ponto:
+
+- **`block`** — há prova no arquivo: HTML, lista faltando, período declarado no
+  cabeçalho, ou queda acima de 30% de **seguidores** num arquivo que não prova a
+  própria profundidade.
+- **`confirm`** — há indício, e a resposta está com quem conhece a conta. É o
+  caso de `SHALLOW_HISTORY` (lista cobre menos de 40% da vida da conta) e do
+  primeiro import, onde não há com o que comparar e o app mostra a contagem e
+  pergunta se bate.
+- **`warn`** — o import serve; `NO_ACTIVITY` é só isso.
+
+**A regra de perda em massa olha `followers`, e só.** Deixar de seguir gente em
+massa — o que a fila de faxina existe para organizar — derruba `following` e não
+toca em `followers`; verificado no arquivo real, tirar 1.000 dos 1.162 seguidos
+passa sem um único problema. Vigiar as duas listas faria o app punir quem usou a
+funcionalidade que ele mesmo oferece.
+
+E quando a queda é de **seguidores** mesmo, `MASS_LOSS` distingue: se o arquivo
+alcança a criação da conta e não declara recorte, ele demonstrou não ser
+truncado, e a queda vira `confirm` em vez de `block` — limpeza de contas falsas
+pelo Instagram e conta que viralizou e esvaziou são eventos reais, e trancar a
+pessoa fora do próprio histórico por causa deles é pior que o problema.
+
+**Não transforme indício em bloqueio.** Conta antiga que só engatou seguidores no
+último ano tem a mesma forma de um export truncado, e não há nada no arquivo que
+as separe — barrá-la é expulsar usuário legítimo de um app que ele não consegue
+usar de outro jeito. Quando há `block`, os `confirm` são suprimidos: não há
+resposta que faça o arquivo entrar.
+
+**JSON virou exigência.** A ordem "aceite HTML para não perder quem esperou 48h"
+foi revertida em 21/08 por decisão do dono. O `htmlExport.ts` continua no core, e
+não é código morto: é dele que sai `detectDataWindow`, **a única declaração de
+período que existe** — o JSON não a traz em lugar nenhum. No caminho JSON a defesa
+é `signup_details.json`, lido por `readAccountCreatedAt()` por *forma* (menor
+epoch plausível) e nunca por rótulo, que é localizado e chega com mojibake.
+
+A tela é `components/VistoriaDoArquivo.tsx`, o único modal do app que interrompe.
+O import que espera resposta fica em `useStore().pendente` — em memória, porque
+reler meio gigabyte depois de a pessoa responder cobraria a espera duas vezes.
+
+**"Não visualizei" não existe, e não vai existir (21/08/2026).** Foi pedido, e a
+varredura do export inteiro fecha o assunto: nenhuma chave de leitura, nem no
+JSON, nem no HTML, nem escondida. `is_geoblocked_for_viewer` é bloqueio
+geográfico; os arquivos `*_viewed` são sobre o que **você** consumiu. O Instagram
+sabe (é o "visto") e não exporta; a API oficial não dá DM de conta pessoal.
+
+No lugar entraram as duas aproximações que a fonte permite, e o texto de cada uma
+diz o que ela é de verdade — nenhuma promete "não visto":
+
+- **`neverReplied`** — você nunca mandou nada nessa conversa. São 66, contra 644
+  de `awaitingYou`. A diferença é a diferença entre um inventário e uma tarefa.
+- **`isRequest`** — veio de `messages/message_requests/`, a caixa que o Instagram
+  esconde atrás de "Solicitações". São 39, e **38 nunca foram respondidas**.
+
+O app lia só `messages/inbox/` até aqui. E o padrão de nome `message_\d+\.json`
+descartava em silêncio uma conversa real: com pasta de nome longo o Instagram
+trunca o caminho e o arquivo chega como `messa.json`.
+
+**Modo conectado, agora com tela (21/08/2026).** O servidor tinha OAuth, coleta e
+agendador desde 15/08 e nenhum botão. Agora tem
+`screens/ConectarInstagramScreen.tsx`, entrada em Perfil → "Conectar ao Instagram
+(só números)" — o parêntese é a última chance de dizer a limitação antes de a
+pessoa investir tempo numa autorização.
+
+E o aviso que o dono pediu: quando a contagem cai, sai um push
+(`api/src/lib/push.ts` + `quedaDeSeguidores.ts`, tabelas já existentes desde a
+migração 002). O texto **é sobre número** — "Você perdeu 3 seguidores… para saber
+quem saiu, importe um arquivo novo". "@fulano deixou de te seguir" é impossível
+por dois motivos somados: o dado não existe neste caminho, e push atravessa Apple
+e Google em claro e aparece na tela de bloqueio. Não avisa alta: app que
+interrompe com boa notícia todo dia é silenciado, e junto vai o aviso que a
+pessoa queria.
+
+**Falta o que não é código**: criar o app na Meta e preencher `INSTAGRAM_APP_*`,
+passar pelo App Review de `instagram_business_manage_insights` (semanas, e
+independente das lojas), e a credencial de push no EAS. Sem eles a tela diz
+"ainda não disponível", que é o estado correto. Ver `docs/MODO-CONECTADO.md`.
+
+**Comentários recebidos e a caixa fantasma (22/08/2026).** Decisão do dono, e a
+maior mudança de postura do projeto até aqui: o servidor passou a **guardar
+conteúdo** vindo da API oficial — comentários nos posts do usuário e mensagens
+diretas que chegam pelo webhook.
+
+Até 21/08 nenhum texto de conversa saía do aparelho, e o `activity.ts` dizia com
+todas as letras que mandar `ActivityData` para a API "recomeça a conversa do
+zero". A conversa aconteceu. Levantei o custo, o dono reafirmou e propôs o que
+tornou a decisão defensável: **criptografia ponta a ponta**.
+
+O aparelho gera um par X25519 (`app/src/lib/cofre.ts`), manda só a pública, e a
+privada fica no Keychain/Keystore. O webhook sela com a pública
+(`api/src/lib/cofre.ts`) antes de tocar no banco. **O servidor grava sem poder
+ler** — cada selo usa um par efêmero descartado na função, então nem o processo
+que cifrou consegue voltar atrás. Perfil sem chave registrada faz o webhook
+**descartar** o evento; guardar em claro "só até o app registrar a chave" é como
+toda promessa de criptografia morre.
+
+O que **não** mudou, e não pode mudar:
+
+- **Nada de escrita.** Os escopos novos (`manage_comments`, `manage_messages`)
+  autorizam responder, ocultar e apagar. Nenhuma função deste projeto faz isso —
+  regra 4, a mesma que recusou o unfollow em massa. Se aparecer uma chamada de
+  escrita em `instagramApi.ts`, ela nasceu de um pedido que a regra recusa.
+- **Nenhuma coluna em claro guarda texto de pessoa.** Metadado (`thread_id`,
+  quando, se foi o usuário que mandou) fica legível porque a listagem ordena por
+  ele; conteúdo, nunca. E nada disso vai para `/admin`.
+- **Retenção curta** (`INSTAGRAM_CONTENT_RETENTION_DAYS`, 30 dias), varrida pelo
+  agendador. Desconectar apaga na hora.
+
+O que a criptografia **não** resolve, e a documentação diz em vez de fingir:
+entre o webhook e a cifragem o texto está na memória do processo, e os metadados
+ficam em claro. Quem lê o banco sabe *que* houve conversa e *quando* — só não
+sabe o quê.
+
+Limites da fonte que a tela precisa repetir, porque calados parecem defeito: a
+API **não tem endpoint de histórico** (só chega o que vem depois de conectar),
+grupo e conversa iniciada pelo usuário não vêm, e **celular novo não abre o que
+foi selado para o antigo** — é o preço da ponta a ponta, e o banner diz isso.
+
+Ler pela API de fato não marca como visto no Instagram; a documentação da Meta é
+explícita, e está citada em `CaixaFantasmaScreen.tsx`.
+
+Dependências que entraram e **exigem build novo**: `expo-crypto` (nativa, para o
+PRNG do tweetnacl — sem ela a geração de chave lança **só no aparelho**) e
+`tweetnacl` (JS puro, nos dois lados). O base64 mora em `core/src/base64.ts` e
+tem teste contra o `Buffer` do Node: um byte errado no preenchimento não daria
+erro, daria "a mensagem não abre", num celular, sem pista da causa.
+
 Antes de mexer no parser, consulte `docs/EXPORT-INSTAGRAM.md` — ele documenta o formato
 real dos dois formatos (JSON e HTML) e as armadilhas já encontradas em arquivo de verdade.
 

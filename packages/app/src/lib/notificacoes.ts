@@ -26,6 +26,8 @@
  */
 
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+import { registrarAparelho, temSessao, VERSAO_DO_APP } from '../api/client';
 import { lerAjuste, salvarAjuste } from './storage';
 
 /** Onde a preferência fica entre aberturas. Prefixo `rastro:` para o clear do web. */
@@ -217,6 +219,14 @@ export async function ativarLembrete(
 
     await agendar(dias, ultimaAtualizacao);
     await salvarAjuste(CHAVE_INTERVALO, String(dias));
+    /*
+     * Aproveita a permissão recém-concedida para registrar o aparelho.
+     *
+     * É o único momento em que o app sabe que a pessoa aceitou receber
+     * notificação. Sem isto, quem liga o lembrete continuaria sem receber o
+     * aviso de queda do modo conectado até reabrir o app.
+     */
+    void registrarParaAvisos();
     return { ok: true };
   } catch {
     return { ok: false, motivo: 'falhou' };
@@ -261,4 +271,78 @@ export async function reagendarLembrete(ultimaAtualizacao: number): Promise<void
  */
 export async function esquecerLembretes(): Promise<void> {
   await desativarLembrete();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Avisos vindos do servidor                                                   */
+
+/**
+ * Registra este aparelho para receber "você perdeu N seguidores".
+ *
+ * ## Como isto é diferente do lembrete acima
+ *
+ * O lembrete é **local**: o próprio aparelho agenda "daqui a 15 dias, avise para
+ * importar de novo". Não depende de conta, de rede nem de servidor.
+ *
+ * Este é **push**: o servidor lê a contagem pela API oficial do Instagram uma
+ * vez por dia, e quando ela cai manda um aviso. Só existe para quem tem conta no
+ * Rastro e conectou o Instagram — sem os dois não há nada para observar.
+ *
+ * O que chega por push é número, nunca nome. O @ de quem saiu vive no aparelho e
+ * não passa pelo servidor; ver packages/api/src/lib/push.ts.
+ *
+ * Silencioso em toda falha: não ter push é perder um aviso, e nenhuma tela pode
+ * quebrar por causa disso.
+ */
+export async function registrarParaAvisos(): Promise<boolean> {
+  if (!lembretesDisponiveis()) return false;
+  if (!temSessao()) return false;
+
+  try {
+    const Notifications = await modulo();
+
+    /*
+     * Não pede permissão aqui. Pedir na abertura do app é o padrão que faz a
+     * pessoa negar por reflexo — e negado uma vez no iOS, `canAskAgain` fica
+     * falso e não há segunda chance. Quem já concedeu (ligando o lembrete)
+     * registra; quem não concedeu registra quando ligar.
+     */
+    const permissao = await Notifications.getPermissionsAsync();
+    if (!permissao.granted) return false;
+
+    await garantirCanal();
+
+    /*
+     * `projectId` é obrigatório fora do Expo Go e vem do app.json. Sem ele a
+     * chamada falha com uma mensagem que só aparece em build de produção —
+     * exatamente onde ninguém está olhando o console.
+     */
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+    if (!projectId) return false;
+
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    if (!token) return false;
+
+    await registrarAparelho({
+      token,
+      platform: Platform.OS === 'ios' ? 'ios' : 'android',
+      appVersion: VERSAO_DO_APP,
+      // Fuso do aparelho, para o servidor não avisar às três da manhã.
+      timezone: fusoDoAparelho(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** O fuso IANA do aparelho, quando o motor de Intl souber dizer. */
+function fusoDoAparelho(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }

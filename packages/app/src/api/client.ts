@@ -16,7 +16,13 @@
 
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import type { Snapshot } from '@rastro/core';
+import type {
+  AudienceBreakdown,
+  DailyFollowerPoint,
+  FollowActivity,
+  ModeCapability,
+  Snapshot,
+} from '@rastro/core';
 import { apagarRefreshToken, guardarRefreshToken, lerRefreshToken } from './tokens';
 
 /**
@@ -490,6 +496,222 @@ export async function sairDeTodosOsAparelhos(): Promise<number> {
   });
   await encerrarSessaoLocal();
   return revogadas;
+}
+
+// --- Modo conectado (API oficial do Instagram) -------------------------------
+//
+// Estas chamadas falam com a NOSSA API, que fala com a API oficial da Meta. O app
+// nunca toca no Instagram direto, e o único arquivo autorizado a fazê-lo continua
+// sendo packages/api/src/lib/instagramApi.ts.
+//
+// O que volta daqui são NÚMEROS. A API oficial não expõe a lista de seguidores
+// para ninguém, então "quem saiu" não existe neste caminho e nenhuma tela pode
+// insinuar que existe.
+
+export interface ModosDoInstagram {
+  capabilities: ModeCapability[];
+  connectedMode: {
+    available: boolean;
+    requirements: string[];
+    scopes: string[];
+    limitation: string;
+  };
+}
+
+/** O que cada modo entrega. Rota pública: não exige conta. */
+export async function lerModos(): Promise<ModosDoInstagram> {
+  const resposta = await bruto('/instagram/modes', { method: 'GET' }, 10_000);
+  if (!resposta.ok) throw await corpoDoErro(resposta);
+  return (await resposta.json()) as ModosDoInstagram;
+}
+
+export interface MetricasDoInstagram {
+  account: {
+    username: string;
+    connectedAt: number;
+    lastSyncAt: number | null;
+    lastError: string | null;
+    tokenExpiresAt: number;
+  };
+  series: DailyFollowerPoint[];
+  activity: FollowActivity[];
+  limitation: string;
+}
+
+/**
+ * Começa a autorização e devolve a URL do Instagram.
+ *
+ * Quem abre a URL é a tela. O redirect de volta cai no NOSSO servidor, não no
+ * app — por isso não há deep link aqui e a tela confere o resultado perguntando
+ * as métricas depois que a pessoa volta do navegador.
+ */
+export async function iniciarConexaoInstagram(profileId: string): Promise<string> {
+  const { authorizeUrl } = await autenticado<{ authorizeUrl: string }>(
+    `/instagram/profiles/${profileId}/connect`,
+    { method: 'POST' },
+  );
+  return authorizeUrl;
+}
+
+/**
+ * Métricas coletadas até agora.
+ *
+ * Devolve `null` quando o perfil não está conectado (409), que não é erro: é a
+ * resposta a "esta conta já autorizou?" e é assim que a tela descobre, depois de
+ * a pessoa voltar do navegador, se a autorização foi concluída.
+ */
+export async function lerMetricasDoInstagram(
+  profileId: string,
+): Promise<MetricasDoInstagram | null> {
+  try {
+    return await autenticado<MetricasDoInstagram>(`/instagram/profiles/${profileId}/metrics`);
+  } catch (erro) {
+    if (erro instanceof ErroDeApi && erro.status === 409) return null;
+    throw erro;
+  }
+}
+
+/** Coleta agora, sem esperar o agendador diário do servidor. */
+export async function sincronizarInstagram(profileId: string): Promise<void> {
+  await autenticado(`/instagram/profiles/${profileId}/sync`, { method: 'POST' });
+}
+
+/** Demografia agregada. `null` quando a conta ainda não tem direito a ela. */
+export async function lerAudienciaDoInstagram(
+  profileId: string,
+): Promise<AudienceBreakdown[] | null> {
+  try {
+    const { breakdowns } = await autenticado<{ breakdowns: AudienceBreakdown[] }>(
+      `/instagram/profiles/${profileId}/audience`,
+    );
+    return breakdowns;
+  } catch (erro) {
+    if (erro instanceof ErroDeApi && erro.status === 409) return null;
+    throw erro;
+  }
+}
+
+/** Revoga o acesso. As métricas já coletadas continuam com o usuário. */
+export async function desconectarInstagram(profileId: string): Promise<void> {
+  await autenticado(`/instagram/profiles/${profileId}/connect`, { method: 'DELETE' });
+}
+
+// --- Conteúdo selado (mensagens e comentários) -------------------------------
+//
+// O servidor devolve o que ele mesmo não consegue ler: cada item vem com um
+// campo `sealed`, que só a chave privada deste aparelho abre. Quem abre é
+// `lib/cofre.ts`; aqui só trafega o selo.
+
+/**
+ * Registra a chave pública deste aparelho.
+ *
+ * Enquanto isto não acontecer, o webhook do servidor **descarta** as mensagens
+ * que chegam — de propósito: guardar em claro "só até o app registrar a chave"
+ * é como toda promessa de criptografia morre.
+ *
+ * `descartouHistorico` volta verdadeiro quando a chave mudou (celular novo, app
+ * reinstalado). O que estava selado para a chave anterior foi apagado, porque
+ * ninguém mais teria como abrir.
+ */
+export async function registrarChaveDoCofre(
+  profileId: string,
+  publicKey: string,
+): Promise<{ descartouHistorico: boolean }> {
+  const r = await autenticado<{ ok: boolean; descartouHistorico: boolean }>(
+    `/instagram/profiles/${profileId}/key`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ publicKey }),
+    },
+  );
+  return { descartouHistorico: r.descartouHistorico };
+}
+
+export interface MensagemSelada {
+  id: string;
+  threadId: string;
+  fromSelf: boolean;
+  at: number;
+  sealed: string;
+}
+
+export interface ComentarioSelado {
+  id: string;
+  mediaId: string | null;
+  parentId: string | null;
+  fromSelf: boolean;
+  at: number;
+  sealed: string;
+}
+
+export async function lerMensagensSeladas(
+  profileId: string,
+): Promise<{ messages: MensagemSelada[]; limitation: string }> {
+  return autenticado(`/instagram/profiles/${profileId}/messages`);
+}
+
+export async function lerComentariosSelados(profileId: string): Promise<ComentarioSelado[]> {
+  const { comments } = await autenticado<{ comments: ComentarioSelado[] }>(
+    `/instagram/profiles/${profileId}/comments`,
+  );
+  return comments;
+}
+
+// --- Avisos por push ---------------------------------------------------------
+
+export interface AparelhoParaAviso {
+  token: string;
+  platform: 'ios' | 'android' | 'web';
+  appVersion?: string;
+  /** IANA. Usado só para o servidor respeitar a faixa de silêncio. */
+  timezone?: string;
+}
+
+/**
+ * Registra o aparelho para receber "você perdeu N seguidores".
+ *
+ * Idempotente: pode ser chamada a cada abertura do app. O servidor reafirma o
+ * token, atualiza `last_seen_at` e reabilita um aparelho que tinha sido marcado
+ * como desinstalado.
+ */
+export async function registrarAparelho(aparelho: AparelhoParaAviso): Promise<void> {
+  await autenticado('/avisos/devices', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(aparelho),
+  });
+}
+
+/** Esquece este aparelho. Chamada quando a pessoa desliga os avisos. */
+export async function esquecerAparelho(token: string): Promise<void> {
+  await autenticado('/avisos/devices', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+}
+
+export interface PreferenciasDeAviso {
+  quedaSeguidores: boolean;
+  quedaMinima: number;
+  silencioInicioHora: number;
+  silencioFimHora: number;
+}
+
+export async function lerPreferenciasDeAviso(profileId: string): Promise<PreferenciasDeAviso> {
+  return autenticado<PreferenciasDeAviso>(`/avisos/profiles/${profileId}/prefs`);
+}
+
+export async function salvarPreferenciasDeAviso(
+  profileId: string,
+  mudancas: Partial<PreferenciasDeAviso>,
+): Promise<PreferenciasDeAviso> {
+  return autenticado<PreferenciasDeAviso>(`/avisos/profiles/${profileId}/prefs`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(mudancas),
+  });
 }
 
 /** Diz se o servidor está no ar. Usado antes de oferecer o modo sincronizado. */

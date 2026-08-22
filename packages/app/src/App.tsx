@@ -68,12 +68,15 @@ import {
 } from './screens/AtividadeListaScreen';
 import { FilaScreen } from './screens/FilaScreen';
 import { PerfilScreen } from './screens/PerfilScreen';
+import { ConectarInstagramScreen } from './screens/ConectarInstagramScreen';
+import { CaixaFantasmaScreen } from './screens/CaixaFantasmaScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { AtualizarScreen } from './screens/AtualizarScreen';
 import { Header, TabBar, type Aba } from './components/Chrome';
 import { Logotipo } from './components/Marca';
 import { LimiteDeErro } from './components/LimiteDeErro';
 import { ConviteDeConta } from './components/ConviteDeConta';
+import { VistoriaDoArquivo } from './components/VistoriaDoArquivo';
 import { relatarErro } from './lib/telemetria';
 import { lerAjuste, salvarAjuste } from './lib/storage';
 import {
@@ -84,10 +87,15 @@ import {
   TEXTO_DA_ACAO,
   type Fila,
 } from './lib/fila';
+import type { ExportCheck } from '@rastro/core';
 import { useStore } from './lib/store';
 import { useConta } from './lib/conta';
 import { useBotaoVoltar } from './lib/voltar';
-import { prepararNotificacoes, reagendarLembrete } from './lib/notificacoes';
+import {
+  prepararNotificacoes,
+  reagendarLembrete,
+  registrarParaAvisos,
+} from './lib/notificacoes';
 import { colors, layout, space, typography } from './lib/theme';
 
 /** Tela empilhada sobre a aba atual. `null` = a própria aba. */
@@ -99,6 +107,8 @@ type Empilhada =
   | { nome: 'atividadeLista'; lista: ListaDeAtividade }
   | { nome: 'entrar'; modo: 'entrar' | 'cadastrar'; motivo?: string }
   | { nome: 'fila' }
+  | { nome: 'instagram' }
+  | { nome: 'fantasma' }
   | null;
 
 /** Chave do ajuste que marca as boas-vindas como já vistas. */
@@ -219,6 +229,20 @@ function App() {
    * não está.
    */
   const [arquivoParaApagar, setArquivoParaApagar] = useState<string | null>(null);
+  /**
+   * Resultado da vistoria à espera de ser mostrado.
+   *
+   * Guardado aqui e não no store porque é estado de tela: o store guarda o
+   * import pendente (que é dado), este guarda o fato de o modal estar aberto.
+   */
+  const [vistoria, setVistoria] = useState<ExportCheck | null>(null);
+  /**
+   * Nome do arquivo que está na vistoria.
+   *
+   * Guardado porque o aviso de "pode apagar o zip" precisa dele, e entre a
+   * pergunta e a resposta o seletor já fechou — a `fonte` não existe mais.
+   */
+  const [arquivoEmVistoria, setArquivoEmVistoria] = useState<string | null>(null);
 
   /*
    * Fonte de display dos títulos.
@@ -243,8 +267,20 @@ function App() {
    */
   const [conviteDispensado, setConviteDispensado] = useState(false);
 
-  const { loading, importing, progress, snapshot, reports, snapshotCount, atividade, error, boot, importZip } =
-    useStore();
+  const {
+    loading,
+    importing,
+    progress,
+    snapshot,
+    reports,
+    snapshotCount,
+    atividade,
+    error,
+    boot,
+    importZip,
+    confirmarPendente,
+    descartarPendente,
+  } = useStore();
   const { conectado, perfil, iniciar, precisaAtualizar, envio } = useConta();
 
   useEffect(() => {
@@ -268,6 +304,18 @@ function App() {
   useEffect(() => {
     if (envio.situacao === 'restaurado' && envio.quantos > 0) void boot();
   }, [envio, boot]);
+
+  /*
+   * Registra o aparelho para os avisos do servidor assim que há conta.
+   *
+   * Não pede permissão: só registra se a pessoa já concedeu antes (ligando o
+   * lembrete). Ver `registrarParaAvisos`. Roda a cada entrada na conta porque o
+   * token de push do Expo troca sozinho — reinstalação, restauração de backup —
+   * e um token velho é um aviso que some sem ninguém notar.
+   */
+  useEffect(() => {
+    if (conectado === true) void registrarParaAvisos();
+  }, [conectado]);
 
   /*
    * Guarda a fila a cada mudança. Escrever a cada conta resolvida é barato — é
@@ -337,6 +385,49 @@ function App() {
 
   useBotaoVoltar(voltar);
 
+  /**
+   * O que acontece depois de o arquivo entrar no histórico.
+   *
+   * Vale para os dois caminhos — o import que passou direto e o que passou
+   * depois de o usuário confirmar. Separado da escolha do arquivo porque o
+   * segundo caminho acontece minutos depois, com o seletor já fechado.
+   */
+  const concluirImport = useCallback(
+    (nomeDoArquivo: string | null) => {
+      // O relógio do lembrete parte da última atualização. Sem reancorar aqui,
+      // ele tocaria logo depois de a pessoa ter acabado de atualizar.
+      void reagendarLembrete(Date.now());
+      if (nomeDoArquivo) setArquivoParaApagar(nomeDoArquivo);
+      setConviteDispensado(false);
+      setEmpilhada(null);
+      setAba('inicio');
+    },
+    [],
+  );
+
+  /** "Conferi, pode guardar": grava o que estava esperando e segue o fluxo normal. */
+  const responderVistoria = useCallback(async () => {
+    setVistoria(null);
+    const { ok, message } = await confirmarPendente();
+    if (!ok) {
+      avisar('Não deu para guardar', message ?? 'Tente importar de novo.');
+      return;
+    }
+    concluirImport(arquivoEmVistoria);
+    setArquivoEmVistoria(null);
+  }, [confirmarPendente, concluirImport, arquivoEmVistoria]);
+
+  /*
+   * Fechar sem confirmar joga o import fora, e é o certo: o arquivo não entrou
+   * no histórico, e deixá-lo pendurado em memória faria o próximo "confirmar" —
+   * vindo de outro arquivo — gravar o antigo.
+   */
+  const fecharVistoria = useCallback(() => {
+    setVistoria(null);
+    setArquivoEmVistoria(null);
+    descartarPendente();
+  }, [descartarPendente]);
+
   /*
    * Escolher e importar.
    *
@@ -360,18 +451,26 @@ function App() {
       if (!fonte) return;
 
       setFase('lendo');
-      const { ok, message } = await importZip(fonte);
+      const { ok, message, check, precisaConfirmar } = await importZip(fonte);
+
+      /*
+       * Três desfechos, e a ordem importa.
+       *
+       * Vistoria vem antes da mensagem de falha porque ela é mais específica:
+       * "este export cobre só 12 meses" resolve o problema, "não deu para ler"
+       * manda a pessoa tentar de novo com o mesmo arquivo errado.
+       */
+      if (check && (!ok || precisaConfirmar)) {
+        setArquivoEmVistoria(fonte.nome);
+        setVistoria(check);
+        return;
+      }
       if (!ok) {
         avisar('Não deu para ler', message ?? 'Tente novamente.');
         return;
       }
-      // O relógio do lembrete parte da última atualização. Sem reancorar aqui,
-      // ele tocaria logo depois de a pessoa ter acabado de atualizar.
-      void reagendarLembrete(Date.now());
-      setArquivoParaApagar(fonte.nome);
-      setConviteDispensado(false);
-      setEmpilhada(null);
-      setAba('inicio');
+
+      concluirImport(fonte.nome);
     } catch (erro) {
       /*
        * Relata antes de avisar. Esta é a falha que só aparece em aparelho de
@@ -433,7 +532,11 @@ function App() {
                   : 'Entrar'
                 : empilhada?.nome === 'fila' && fila
                   ? TEXTO_DA_ACAO[fila.acao].titulo
-                  : undefined;
+                  : empilhada?.nome === 'instagram'
+                    ? 'Modo conectado'
+                    : empilhada?.nome === 'fantasma'
+                      ? 'Caixa fantasma'
+                      : undefined;
 
   const semDados = !snapshot || !reports;
   // O store liga `importing` por conta própria; a fase local cobre o trecho
@@ -468,17 +571,31 @@ function App() {
      */
     const noArquivo = empilhada?.nome === 'arquivo';
     const naEntrada = empilhada?.nome === 'entrar';
+    const noInstagram = empilhada?.nome === 'instagram';
+    const naFantasma = empilhada?.nome === 'fantasma';
     const noPerfil = aba === 'perfil';
 
     return (
       <Raiz>
         {naEntrada ? (
           <Header titulo={tituloEmpilhada} onVoltar={() => setEmpilhada(null)} />
-        ) : noArquivo || noPerfil ? (
+        ) : noArquivo || noInstagram || naFantasma || noPerfil ? (
           <Header
-            titulo={noArquivo ? 'Sobre o arquivo' : 'Perfil'}
+            titulo={
+              noArquivo
+                ? 'Sobre o arquivo'
+                : noInstagram
+                  ? 'Modo conectado'
+                  : naFantasma
+                    ? 'Caixa fantasma'
+                    : 'Perfil'
+            }
             // Sem barra de abas nesta fase, o cabeçalho é a única saída.
-            onVoltar={noArquivo ? () => setEmpilhada(null) : () => setAba('importar')}
+            onVoltar={
+              noArquivo || noInstagram || naFantasma
+                ? () => setEmpilhada(null)
+                : () => setAba('importar')
+            }
           />
         ) : (
           <Header acao={<AtalhoPerfil onPress={() => setAba('perfil')} />} />
@@ -492,6 +609,28 @@ function App() {
           />
         ) : noArquivo ? (
           <SobreOArquivoScreen />
+        ) : noInstagram ? (
+          <ConectarInstagramScreen
+            profileId={perfil?.id ?? null}
+            onCriarConta={() =>
+              setEmpilhada({
+                nome: 'entrar',
+                modo: 'cadastrar',
+                motivo: 'A coleta diária roda no servidor, com o app fechado.',
+              })
+            }
+          />
+        ) : naFantasma ? (
+          <CaixaFantasmaScreen
+            profileId={perfil?.id ?? null}
+            onCriarConta={() =>
+              setEmpilhada({
+                nome: 'entrar',
+                modo: 'cadastrar',
+                motivo: 'O Instagram avisa o servidor, com o app fechado.',
+              })
+            }
+          />
         ) : noPerfil ? (
           <PerfilScreen
             snapshotCount={snapshotCount}
@@ -500,6 +639,8 @@ function App() {
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
             onCriarConta={() => setEmpilhada({ nome: 'entrar', modo: 'cadastrar' })}
             onEntrar={() => setEmpilhada({ nome: 'entrar', modo: 'entrar' })}
+            onAbrirModoConectado={() => setEmpilhada({ nome: 'instagram' })}
+            onAbrirCaixaFantasma={() => setEmpilhada({ nome: 'fantasma' })}
           />
         ) : (
           <ImportGuideScreen
@@ -511,7 +652,18 @@ function App() {
             error={error}
           />
         )}
-      </Raiz>
+
+      <VistoriaDoArquivo
+        check={vistoria}
+        onConfirmar={() => void responderVistoria()}
+        onDescartar={fecharVistoria}
+        onVerComoPedir={() => {
+          fecharVistoria();
+          setEmpilhada(null);
+          setAba('importar');
+        }}
+      />
+    </Raiz>
     );
   }
 
@@ -549,6 +701,28 @@ function App() {
           <StatsScreen reports={reports} snapshotCount={snapshotCount} />
         ) : empilhada?.nome === 'arquivo' ? (
           <SobreOArquivoScreen />
+        ) : empilhada?.nome === 'instagram' ? (
+          <ConectarInstagramScreen
+            profileId={perfil?.id ?? null}
+            onCriarConta={() =>
+              setEmpilhada({
+                nome: 'entrar',
+                modo: 'cadastrar',
+                motivo: 'A coleta diária roda no servidor, com o app fechado.',
+              })
+            }
+          />
+        ) : empilhada?.nome === 'fantasma' ? (
+          <CaixaFantasmaScreen
+            profileId={perfil?.id ?? null}
+            onCriarConta={() =>
+              setEmpilhada({
+                nome: 'entrar',
+                modo: 'cadastrar',
+                motivo: 'O Instagram avisa o servidor, com o app fechado.',
+              })
+            }
+          />
         ) : empilhada?.nome === 'atividade' ? (
           <AtividadeScreen
             atividade={atividade}
@@ -641,6 +815,8 @@ function App() {
             onAbrirSobreArquivo={() => setEmpilhada({ nome: 'arquivo' })}
             onCriarConta={() => setEmpilhada({ nome: 'entrar', modo: 'cadastrar' })}
             onEntrar={() => setEmpilhada({ nome: 'entrar', modo: 'entrar' })}
+            onAbrirModoConectado={() => setEmpilhada({ nome: 'instagram' })}
+            onAbrirCaixaFantasma={() => setEmpilhada({ nome: 'fantasma' })}
           />
         )}
       </View>
@@ -652,6 +828,17 @@ function App() {
           // ainda mostraria a lista aberta antes e o toque pareceria ignorado.
           setEmpilhada(null);
           setAba(nova);
+        }}
+      />
+
+      <VistoriaDoArquivo
+        check={vistoria}
+        onConfirmar={() => void responderVistoria()}
+        onDescartar={fecharVistoria}
+        onVerComoPedir={() => {
+          fecharVistoria();
+          setEmpilhada(null);
+          setAba('importar');
         }}
       />
     </Raiz>

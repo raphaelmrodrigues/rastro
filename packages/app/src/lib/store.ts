@@ -8,12 +8,14 @@
 
 import { create } from 'zustand';
 import {
+  checkExport,
   computeCohorts,
   computeInsights,
   diffSnapshots,
   followersByPeriod,
   isSnapshotUsable,
   stalePendingRequests,
+  type ExportCheck,
   type Relationship,
   type Snapshot,
   type SnapshotDiff,
@@ -61,10 +63,40 @@ interface State {
    */
   atividade: ActivityData | null;
   error: string | null;
+  /**
+   * Import lido e vistoriado, esperando a palavra do usuário.
+   *
+   * Fica em memória em vez de o app reler o zip depois da resposta: o export
+   * completo tem meio gigabyte e levou dezenas de segundos para chegar até aqui.
+   * Pedir para confirmar e então repetir tudo seria cobrar a espera duas vezes.
+   */
+  pendente: ImportPendente | null;
 
   boot: () => Promise<void>;
-  importZip: (fonte: FonteArquivo) => Promise<{ ok: boolean; message?: string }>;
+  importZip: (fonte: FonteArquivo) => Promise<ResultadoDoImport>;
+  /** Salva o import que estava esperando resposta. */
+  confirmarPendente: () => Promise<ResultadoDoImport>;
+  descartarPendente: () => void;
   eraseAll: () => Promise<void>;
+}
+
+interface ImportPendente {
+  snapshot: Snapshot;
+  atividade: ActivityData | null;
+  check: ExportCheck;
+}
+
+export interface ResultadoDoImport {
+  ok: boolean;
+  /** Falha que não é vistoria: arquivo ilegível, zip quebrado, bug nosso. */
+  message?: string;
+  /**
+   * O que a vistoria encontrou. Vem preenchido mesmo quando `ok` é verdadeiro —
+   * um export sem conversas passa, e o aviso ainda precisa aparecer.
+   */
+  check?: ExportCheck;
+  /** Há `confirm` pendente: o arquivo está em `pendente`, esperando resposta. */
+  precisaConfirmar?: boolean;
 }
 
 function buildReports(snapshot: Snapshot, previous: Snapshot | null): Reports {
@@ -82,6 +114,54 @@ function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Grava o import e propaga para tela, arquivo e servidor.
+ *
+ * Fora do store porque os dois caminhos que chegam aqui — import direto e import
+ * confirmado depois de uma pergunta — precisam fazer exatamente a mesma coisa, e
+ * duplicar isto é como um dos dois deixa de sincronizar sem ninguém perceber.
+ */
+async function gravar(
+  set: (parcial: Partial<State>) => void,
+  get: () => State,
+  snapshot: Snapshot,
+  atividade: ActivityData | null,
+): Promise<void> {
+  const anterior = get().snapshot;
+  await saveSnapshot(snapshot);
+
+  /*
+   * A atividade só é substituída quando o arquivo novo traz atividade.
+   *
+   * Sem esse cuidado, quem mandou o export completo e depois mandou um
+   * export rápido perderia as conversas e os anunciantes sem entender por
+   * quê. O resumo antigo continua válido: ele descreve um retrato de quando
+   * foi feito, e a tela mostra a data.
+   */
+  if (atividade) await saveActivity(atividade);
+
+  set({
+    importing: false,
+    snapshot,
+    previous: anterior,
+    snapshotCount: get().snapshotCount + 1,
+    reports: buildReports(snapshot, anterior),
+    ...(atividade ? { atividade } : {}),
+  });
+
+  /*
+   * Envio ao servidor, se houver conta. Depois de gravar e sem `await`:
+   * o import já está completo e válido neste aparelho, e prender a tela
+   * esperando a rede transformaria a parte confiável do produto na parte
+   * frágil. Falha de envio vira estado 'pendente' na tela de conta, nunca
+   * um import perdido.
+   *
+   * `sincronizar` sai cedo e em silêncio quando não há conta — que é o modo
+   * padrão. Nenhum byte é enviado sem o usuário ter criado conta.
+   */
+  void useConta.getState().sincronizar(snapshot);
+}
+
 export const useStore = create<State>((set, get) => ({
   loading: true,
   importing: false,
@@ -92,6 +172,7 @@ export const useStore = create<State>((set, get) => ({
   snapshotCount: 0,
   atividade: null,
   error: null,
+  pendente: null,
 
   async boot() {
     set({ loading: true });
@@ -124,10 +205,12 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async importZip(fonte) {
-    set({ importing: true, progress: 0, error: null });
+    set({ importing: true, progress: 0, error: null, pendente: null });
     try {
-      const { snapshot, filesFound, atividade } = await snapshotFromZip(fonte, newId(), (fracao) =>
-        set({ progress: fracao }),
+      const { snapshot, filesFound, activityFiles, atividade } = await snapshotFromZip(
+        fonte,
+        newId(),
+        (fracao) => set({ progress: fracao }),
       );
 
       /*
@@ -160,42 +243,30 @@ export const useStore = create<State>((set, get) => ({
         };
       }
 
-      const anterior = get().snapshot;
-      await saveSnapshot(snapshot);
-
       /*
-       * A atividade só é substituída quando o arquivo novo traz atividade.
-       *
-       * Sem esse cuidado, quem mandou o export completo e depois mandou um
-       * export rápido — o caminho normal, porque o rápido é o que o app pede —
-       * perderia as conversas e os anunciantes sem entender por quê. O resumo
-       * antigo continua válido: ele descreve um retrato de quando foi feito, e a
-       * tela mostra a data.
+       * A vistoria. Roda depois do parsing e ANTES de gravar, que é a única
+       * ordem que serve: um snapshot recortado, uma vez salvo, vira a base de
+       * comparação do próximo e transforma centenas de pessoas em "saíram".
+       * Ver packages/core/src/completeness.ts.
        */
-      if (atividade) await saveActivity(atividade);
-
-      set({
-        importing: false,
+      const check = checkExport({
         snapshot,
-        previous: anterior,
-        snapshotCount: get().snapshotCount + 1,
-        reports: buildReports(snapshot, anterior),
-        ...(atividade ? { atividade } : {}),
+        previous: get().snapshot,
+        activityFiles,
       });
 
-      /*
-       * Envio ao servidor, se houver conta. Depois de gravar e sem `await`:
-       * o import já está completo e válido neste aparelho, e prender a tela
-       * esperando a rede transformaria a parte confiável do produto na parte
-       * frágil. Falha de envio vira estado 'pendente' na tela de conta, nunca
-       * um import perdido.
-       *
-       * `sincronizar` sai cedo e em silêncio quando não há conta — que é o modo
-       * padrão. Nenhum byte é enviado sem o usuário ter criado conta.
-       */
-      void useConta.getState().sincronizar(snapshot);
+      if (!check.ok) {
+        set({ importing: false });
+        return { ok: false, check };
+      }
 
-      return { ok: true };
+      if (check.needsConfirmation) {
+        set({ importing: false, pendente: { snapshot, atividade, check } });
+        return { ok: false, check, precisaConfirmar: true };
+      }
+
+      await gravar(set, get, snapshot, atividade);
+      return { ok: true, check };
     } catch (error) {
       // Exceção no import não é falha de parsing (que vira warning): é bug nosso
       // ou arquivo em formato que o descompactador não conhece. Vale um relato.
@@ -206,8 +277,35 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
+  async confirmarPendente() {
+    const pendente = get().pendente;
+    if (!pendente) return { ok: false, message: 'Não há import esperando confirmação.' };
+
+    set({ pendente: null });
+    try {
+      await gravar(set, get, pendente.snapshot, pendente.atividade);
+      return { ok: true, check: pendente.check };
+    } catch (error) {
+      relatarErro(error, 'confirmarPendente');
+      const message = error instanceof Error ? error.message : 'Falha ao salvar o arquivo.';
+      set({ error: message });
+      return { ok: false, message };
+    }
+  },
+
+  descartarPendente() {
+    set({ pendente: null });
+  },
+
   async eraseAll() {
     await eraseEverything();
-    set({ snapshot: null, previous: null, reports: null, snapshotCount: 0, atividade: null });
+    set({
+      snapshot: null,
+      previous: null,
+      reports: null,
+      snapshotCount: 0,
+      atividade: null,
+      pendente: null,
+    });
   },
 }));

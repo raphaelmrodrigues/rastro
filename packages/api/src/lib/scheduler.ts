@@ -25,7 +25,28 @@ interface Logger {
   warn(payload: unknown, message?: string): void;
 }
 
+/**
+ * Apaga o conteúdo vencido.
+ *
+ * A retenção existe para o Rastro não virar arquivo paralelo da caixa de entrada
+ * de ninguém. Roda junto com a coleta porque é a mesma cadência e não merece
+ * agendador próprio.
+ */
+async function varrerVencidos(log: Logger): Promise<void> {
+  try {
+    const msgs = await sql`DELETE FROM instagram_messages WHERE expires_at <= now() RETURNING id`;
+    const cmts = await sql`DELETE FROM instagram_comments WHERE expires_at <= now() RETURNING id`;
+    if (msgs.length + cmts.length > 0) {
+      log.info({ mensagens: msgs.length, comentarios: cmts.length }, 'conteúdo vencido apagado');
+    }
+  } catch (error) {
+    log.warn({ error: String(error) }, 'falha ao varrer conteúdo vencido');
+  }
+}
+
 async function tick(log: Logger): Promise<void> {
+  await varrerVencidos(log);
+
   const due = await sql`
     SELECT ca.profile_id
     FROM connected_accounts ca

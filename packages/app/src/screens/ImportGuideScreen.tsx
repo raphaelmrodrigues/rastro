@@ -23,16 +23,23 @@
  * o que esta tela realmente é: um procedimento. E procedimento se lê recolhido,
  * um passo de cada vez, não como parede.
  *
- * Duas instruções continuam com destaque visual porque são as que, se erradas,
- * estragam o resultado sem o usuário perceber:
+ * Duas instruções têm destaque visual porque são as que, se erradas, o app
+ * recusa o arquivo — e o usuário perde a espera inteira do Instagram:
  *
- * 1. "Marque só Seguidores e seguindo" — sem isso o arquivo vem com fotos e
- *    conversas, passa de 100 MB e demora horas a mais para ficar pronto.
+ * 1. "Todo o período" — é o passo que mais gente erra. Medido no arquivo do
+ *    dono, em 21/08/2026: o mesmo perfil rendeu **1.361 seguidores** com "Todo o
+ *    período" e **222** com 12 meses. Comparar um desses com um completo faz o
+ *    app acusar 1.139 saídas que nunca aconteceram.
  *
- * 2. "Todo o período" — é o passo que mais gente erra. Um arquivo de 12 meses
- *    não traz a lista completa de seguidores, só quem entrou dentro da janela.
- *    Comparar um desses com um completo faz o app acusar centenas de saídas que
- *    nunca aconteceram.
+ * 2. "JSON" — desde 21/08/2026 é exigência, não preferência. No HTML a data de
+ *    cada pessoa tem precisão de minuto e depende de um fuso que o arquivo
+ *    declara errado. A vistoria recusa HTML; ver packages/core/src/completeness.ts.
+ *
+ * O que **deixou** de ter destaque é "marque só Seguidores e seguindo". O motivo
+ * é medição: o pedido completo do dono ficou pronto em 25 minutos (está no
+ * próprio export, em `your_information_download_requests.json`), e o pedido
+ * completo é o que habilita as conversas. A economia de tempo era menor do que
+ * parecia e custava metade do app.
  *
  * ## As duas pessoas que chegam aqui
  *
@@ -58,22 +65,22 @@ const PASSOS = [
     body: 'Depois em "Baixar suas informações" e em "Solicitar um download".',
   },
   {
-    title: 'Marque só "Seguidores e seguindo"',
-    body: 'Escolha "Algumas das suas informações" e selecione apenas essa opção. O arquivo fica pronto em minutos, em vez de horas.',
-    emphasis: true,
+    title: 'Peça "Todas as informações disponíveis"',
+    body: 'É o pedido completo. Ele traz suas listas de seguidores e também as conversas, que é o que habilita a aba Atividade. Se preferir o menor, escolha "Algumas das suas informações" e marque "Seguidores e seguindo" — o app funciona, só a aba Atividade fica vazia.',
   },
   {
     title: 'Em período, escolha "Todo o período"',
-    body: 'Este é o passo que mais gente erra. Se você limitar a 12 meses, o arquivo vem incompleto e o app vai achar que muita gente parou de te seguir sem ter parado.',
+    body: 'Este é o passo que mais gente erra, e o app recusa o arquivo se você errar. Num teste real, o mesmo perfil rendeu 1.361 seguidores pedindo "Todo o período" e só 222 limitando a 12 meses — as outras 1.139 pessoas apareceriam como se tivessem ido embora.',
     emphasis: true,
   },
   {
-    title: 'Escolha JSON, se aparecer',
-    body: 'HTML também funciona. Com JSON as datas ficam mais precisas, mas não vale refazer o pedido só por isso.',
+    title: 'Em formato, escolha JSON',
+    body: 'O app só aceita JSON. No HTML a data de cada pessoa vem com precisão de minuto e num fuso que o próprio arquivo declara errado — dá para ler, mas não dá para confiar.',
+    emphasis: true,
   },
   {
     title: 'Espere o e-mail do Instagram',
-    body: 'Pedindo só a lista de seguidores, ele costuma chegar em poucos minutos. Você não precisa deixar o app aberto — o Instagram avisa por e-mail. (Em contas muito antigas pode demorar mais; o prazo máximo que o Instagram publica é de 48 horas.)',
+    body: 'O pedido completo do nosso teste ficou pronto em 25 minutos. Você não precisa deixar o app aberto — o Instagram avisa por e-mail. (Em contas muito grandes pode demorar mais; o prazo máximo que o Instagram publica é de 48 horas.)',
   },
   {
     title: 'Volte aqui e envie o arquivo',

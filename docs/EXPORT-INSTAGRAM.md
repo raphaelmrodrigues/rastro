@@ -45,13 +45,84 @@ Por que isso é o problema mais grave do produto, e não um detalhe:
 - em ambos os casos o app entrega uma lista de nomes **errada**, e o usuário age em
   cima dela.
 
-O core trata isso em três camadas:
+### Quanto isso custa, em números do arquivo real (21/08/2026)
 
-1. `detectDataWindow()` extrai a janela declarada (`htmlExport.ts`);
+O mesmo perfil, os mesmos dias, dois pedidos diferentes:
+
+| pedido | seguidores | seguindo | mais antigo |
+|---|---|---|---|
+| "Todo o período" (JSON, 13 e 21/08) | 1.361 / 1.359 | 1.157 / 1.162 | 27/11/2014 |
+| período de 12 meses (HTML, 12/08) | **222** | 1.158 | — |
+
+Duas coisas a notar. A primeira: **1.139 seguidores somem**. A segunda, menos
+óbvia e mais perigosa: a lista de *seguindo* veio quase completa no mesmo
+arquivo. O recorte não é uniforme, então "as duas listas encolheram junto" não
+serve como sinal.
+
+E a data mais antiga do export completo — 27/11/2014 — é exatamente a data de
+criação da conta, que está em `signup_details.json`. É isso que torna a
+verificação possível sem o cabeçalho do HTML.
+
+### As camadas de defesa
+
+1. `detectDataWindow()` extrai a janela declarada (`htmlExport.ts`) — **só o HTML
+   declara período; o JSON não traz essa informação em lugar nenhum**;
 2. `parseExport()` emite o warning `PARTIAL_EXPORT` e preenche `Snapshot.dataWindow`;
 3. `diffSnapshots()` compara as janelas dos dois snapshots e devolve
-   `reliability.level = 'suspect'` quando elas não batem — a UI mostra o aviso
-   antes da lista, não como rodapé.
+   `reliability.level = 'suspect'` quando elas não batem;
+4. `checkExport()` (`completeness.ts`, 21/08/2026) **recusa o import** antes de
+   ele virar histórico. É a camada que faltava: as três primeiras avisavam depois
+   de o arquivo já estar salvo, e um snapshot recortado salvo envenena todos os
+   diffs seguintes.
+
+O que `checkExport` bloqueia, e com que evidência:
+
+| código | evidência | severidade |
+|---|---|---|
+| `FORMAT_HTML` | `snapshot.format` | bloqueia |
+| `MISSING_FOLLOWERS` / `MISSING_FOLLOWING` | lista vazia | bloqueia |
+| `DECLARED_WINDOW` | cabeçalho do HTML | bloqueia |
+| `MASS_LOSS` | queda > 30% de **seguidores** vs. o arquivo anterior | bloqueia ou pergunta |
+| `SHALLOW_HISTORY` | lista cobre < 40% da vida da conta | pergunta |
+| `CONFIRM_COUNT` | primeiro import, nada com que comparar | pergunta |
+| `NO_ACTIVITY` | zero arquivos de conversa | avisa |
+
+`MASS_LOSS` merece duas notas. A primeira: ela compara **seguidores**, nunca
+*seguindo*. Deixar de seguir em massa é o que a fila de faxina existe para
+organizar, e vigiar `following` faria o app punir quem usou a própria
+funcionalidade — no arquivo real, tirar 1.000 dos 1.162 seguidos passa limpo. A
+segunda: quando a queda é de seguidores mesmo, ela **bloqueia** se o arquivo não
+prova a própria profundidade e apenas **pergunta** se ele alcança a criação da
+conta sem declarar recorte. Nesse segundo caso o arquivo demonstrou não ser
+truncado, e a queda é evento real — limpeza de contas falsas, conta que viralizou
+e esvaziou.
+
+A distinção entre *bloqueia* e *pergunta* não é timidez. Conta antiga que só
+engatou seguidores no último ano tem exatamente a mesma forma de um export
+truncado, e não há nada no arquivo que as separe — barrá-la seria expulsar
+usuário legítimo. Onde a evidência é circunstancial, quem responde é quem conhece
+a conta.
+
+### A data de criação da conta
+
+`security_and_login_information/login_and_profile_creation/signup_details.json`,
+categoria "Informações de segurança e login" do pedido de export.
+
+Lido por `readAccountCreatedAt()` (`parser.ts`), que pega **o menor epoch
+plausível do arquivo** — busca por forma, não por rótulo, porque o rótulo é
+localizado ("Hora", "Time") e ainda chega com mojibake no português. Nenhuma
+string do arquivo é lida: ele guarda IP, e-mail e telefone.
+
+### Quanto o Instagram realmente demora
+
+`your_instagram_activity/other_activity/your_information_download_requests.json`
+registra o pedido e a conclusão. Nos dois pedidos completos do arquivo real:
+
+- 1.483 s (~25 min) para o export completo de 468 MB;
+- 1.365 s (~23 min) para o anterior.
+
+As 48 horas são o teto publicado, não a expectativa. Um onboarding que anuncia
+48h como regra faz desistir quem teria o arquivo antes do almoço.
 
 ## Onde ficam os arquivos dentro do zip
 
@@ -376,3 +447,60 @@ desfeito em 20/08/2026, com ganho de 9 links, todos duvidosos.
 
 A saída que o app usa é abrir a **busca** do Instagram pelo nome, em vez de fingir
 que sabe o perfil.
+
+## Não existe status de leitura. Em lugar nenhum.
+
+*(varrido em 21/08/2026, no export completo de 468 MB)*
+
+Foi pedido "quero as conversas que eu não visualizei". A resposta é não, e é
+definitiva — não é limitação do parser.
+
+As chaves de mensagem, em 600 conversas lidas, são exatamente estas:
+
+```
+sender_name, timestamp_ms, is_geoblocked_for_viewer,
+is_unsent_image_by_messenger_kid_parent, content, share,
+reactions, audio_files, photos, call_duration, videos
+```
+
+E as da raiz da conversa:
+
+```
+participants, messages, title, is_still_participant,
+thread_path, magic_words, joinable_mode, image
+```
+
+Nenhum campo de leitura. `is_geoblocked_for_viewer` é bloqueio geográfico, não
+"visto". A varredura por `read|seen|unread|view|opened|delivered` em todos os
+JSON do zip só devolve arquivos sobre o que **você** consumiu — `stories_viewed`,
+`posts_viewed`, `ads_viewed`, `recently_viewed_items` — nada sobre DM.
+
+O Instagram sabe (é o "visto" azul) e não exporta. A API oficial não dá acesso a
+DM de conta pessoal. Não há fonte legítima.
+
+### As duas aproximações que existem
+
+| lista | critério | quantas |
+|---|---|---|
+| "Você não respondeu" | última mensagem não é sua e você não reagiu | 644 |
+| **"Você nunca respondeu"** | você nunca mandou nada nessa conversa | **66** |
+| **"Pedidos de mensagem"** | veio de `messages/message_requests/` | **39** |
+
+Das 39 solicitações, **38 nunca foram respondidas** — o que confirma a intuição:
+a caixa de solicitações é onde mora a mensagem que ninguém abriu.
+
+`neverReplied` sai de `ConversationDraft.senders`, o conjunto de remetentes
+distintos da conversa. Fica no rascunho porque "quem é você" só se descobre
+olhando todas as conversas juntas, e voltar às 54 mil mensagens depois custaria
+uma segunda passagem pelo zip.
+
+## Duas caixas, e um arquivo com nome truncado
+
+`messages/` tem `inbox/` (4.018 arquivos) e `message_requests/` (41). Até
+21/08/2026 o app lia só o primeiro, e as solicitações não existiam para ele.
+
+E o padrão antigo de nome — `message_\d+\.json` — descartava em silêncio uma
+conversa real: quando o nome da pasta fica longo demais, o Instagram trunca o
+caminho inteiro e o arquivo chega como `messa.json`. Acontece uma vez no export
+do dono. Dentro da pasta de uma conversa só existem os JSON dela e a mídia, então
+`CONVERSA` hoje aceita qualquer `.json` ali.
